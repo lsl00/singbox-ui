@@ -148,3 +148,18 @@ Authorization: Bearer <secret>    # 仅当配置了密钥时
 - 服务端流以有界快照轮询实现，而非每条特性一条持久流；
 - 日志 `Infinite` 模式允许无界内存增长，仅建议短期调试使用；
 - 托盘标题字体大小跟随系统，无法通过 Tauri 直接调整。
+
+## 旧 Linux：Go TUI
+
+如果目标系统无法运行 Tauri 或 Rust 工具链，使用同目录下的
+`singbox-go-tui/`。这是一个不依赖 WebView、`protoc` 和 CGO 的 Go 终端版，
+直接连接同一个 sing-box 1.14+ gRPC-Web API，提供概览、代理组、连接、日志和
+设置页面。
+
+```bash
+cd singbox-go-tui
+./build-local.sh
+./singbox-go-tui --url http://127.0.0.1:9000
+```
+
+详细构建方式和快捷键见 `singbox-go-tui/README.md`。
