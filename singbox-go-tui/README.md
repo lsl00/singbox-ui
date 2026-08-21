@@ -11,6 +11,7 @@ Tauri、Rust、Node.js、WebView、`protoc` 或 CGO，适合无法运行桌面�
 - Logs：等级过滤、滚动/跟随、清空日志，最多保留 2000 条本地记录
 - Settings：编辑 API 地址和 secret，连接配置保存到
   `~/.config/singbox-go-tui/config`
+- Servers：多服务器监控卡片，每张卡片显示服务器名称、上下行速率和累计流量
 
 ## 构建
 
@@ -48,10 +49,32 @@ SINGBOX_API_SECRET=your-secret \
 `--no-connect` 可以启动后在 Settings 页面手动连接。secret 配置文件会以
 `0600` 权限写入。
 
+## 多服务器监控
+
+Servers 页面（按 `6`）通过 `--servers PATH` 指定的服务器列表配置监控多个
+sing-box 服务端，每 2 秒轮询一次状态，以自适应网格卡片展示名称、上下行速率
+和累计流量。**未指定 `--servers` 时不监控任何服务器，该页面显示为空**，
+不影响其他页面。
+
+配置文件每行一条记录，格式为 `名称 host:port`，支持 `#` 注释和空行：
+
+```text
+# 名称  地址
+main    127.0.0.1:9000
+backup  example.com:9443
+custom  http://192.168.1.10:8080
+```
+
+地址未写 scheme 时自动补 `http://`。这些连接不使用 secret。
+
+```bash
+./singbox-go-tui --servers ~/.config/singbox-go-tui/servers
+```
+
 ## 快捷键
 
 ```text
-1..5       切换页面
+1..6       切换页面
 Tab        下一页
 r          立即刷新
 ?          帮助
@@ -65,6 +88,8 @@ Connections 页面：Up/Down、Enter、`c`、`C`。
 Logs 页面：Up/Down、PgUp/PgDn、Home/End、`f`、`a`、`c`。
 
 Settings 页面：Up/Down、Enter/`e`、文字编辑、`c`、`d`。
+
+Servers 页面：Up/Down、PgUp/PgDn、Home/End。
 
 ## 协议实现
 

@@ -17,8 +17,14 @@ type APIConfig struct {
 	Secret string
 }
 
+type ServerEntry struct {
+	Name    string
+	BaseURL string
+}
+
 type CLIConfig struct {
 	API         APIConfig
+	ServersPath string
 	AutoConnect bool
 	ShowHelp    bool
 }
@@ -38,6 +44,7 @@ func parseCLI(args []string) (CLIConfig, error) {
 
 	var showHelp bool
 	var noConnect bool
+	var serversPath string
 	flags := flag.NewFlagSet("singbox-go-tui", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.BoolVar(&showHelp, "help", false, "show help")
@@ -47,6 +54,7 @@ func parseCLI(args []string) (CLIConfig, error) {
 	flags.StringVar(&api.URL, "u", api.URL, "sing-box API URL")
 	flags.StringVar(&api.Secret, "secret", api.Secret, "API bearer secret")
 	flags.StringVar(&api.Secret, "s", api.Secret, "API bearer secret")
+	flags.StringVar(&serversPath, "servers", serversPath, "path to server list config")
 
 	if err := flags.Parse(args); err != nil {
 		return CLIConfig{}, err
@@ -62,7 +70,7 @@ func parseCLI(args []string) (CLIConfig, error) {
 	}
 	api.URL = strings.TrimRight(strings.TrimSpace(api.URL), "/")
 
-	return CLIConfig{API: api, AutoConnect: !noConnect}, nil
+	return CLIConfig{API: api, ServersPath: serversPath, AutoConnect: !noConnect}, nil
 }
 
 func printHelp() {
@@ -74,6 +82,8 @@ Usage:
 Options:
   -u, --url URL       sing-box API URL (default: http://localhost:9000)
   -s, --secret VALUE  API bearer secret
+      --servers PATH  server list config for the Servers page (optional;
+                      without it the Servers page stays empty)
       --no-connect    start without connecting automatically
   -h, --help          show this help
 
@@ -82,7 +92,7 @@ Environment:
   SINGBOX_API_SECRET  overrides the saved API secret
 
 Keys:
-  1-5 switch pages, r refresh, ? help, q or Ctrl-C quit
+  1-6 switch pages, r refresh, ? help, q or Ctrl-C quit
 `)
 }
 
@@ -92,6 +102,33 @@ func configPath() (string, bool) {
 		return "", false
 	}
 	return filepath.Join(home, ".config", "singbox-go-tui", "config"), true
+}
+
+func loadServerEntries(path string) []ServerEntry {
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	entries := make([]ServerEntry, 0)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		address := fields[1]
+		if !strings.Contains(address, "://") {
+			address = "http://" + address
+		}
+		entries = append(entries, ServerEntry{Name: fields[0], BaseURL: address})
+	}
+	return entries
 }
 
 func loadSavedConfig() APIConfig {

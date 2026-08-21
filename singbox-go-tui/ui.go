@@ -44,6 +44,8 @@ func drawScreen(screen tcell.Screen, app *App) {
 			drawLogs(screen, 0, 3, width, mainHeight, app)
 		case ViewSettings:
 			drawSettings(screen, 0, 3, width, mainHeight, app)
+		case ViewServers:
+			drawServers(screen, 0, 3, width, mainHeight, app)
 		}
 	}
 	if footerY >= 0 {
@@ -80,7 +82,7 @@ func drawHeader(screen tcell.Screen, x, y, width int, app *App) {
 	drawText(screen, x+17+len([]rune(version))+2, y, width-20-len([]rune(version)), statusText, cellStyle(statusColor, colorPanel))
 
 	tabX := x + 1
-	for view := ViewOverview; view <= ViewSettings; view++ {
+	for view := ViewOverview; view <= ViewServers; view++ {
 		label := fmt.Sprintf("[%d] %s", view.number(), view.title())
 		style := cellStyle(colorMuted, colorPanel)
 		if app.view == view {
@@ -108,6 +110,8 @@ func drawFooter(screen tcell.Screen, x, y, width int, app *App) {
 		hints = "Up/Down scroll  PgUp/PgDn  f filter  a follow  c clear"
 	case ViewSettings:
 		hints = "Up/Down field  Enter/e edit  c connect  d disconnect"
+	case ViewServers:
+		hints = "Up/Down select  PgUp/PgDn page  Home/End"
 	}
 	drawText(screen, x+1, y+1, width-2, hints, cellStyle(colorMuted, colorPanel))
 	message := "ready"
@@ -492,6 +496,81 @@ func drawSettings(screen tcell.Screen, x, y, width, height int, app *App) {
 	}
 }
 
+func drawServers(screen tcell.Screen, x, y, width, height int, app *App) {
+	if len(app.servers) == 0 {
+		drawPlaceholder(screen, x, y, width, height, "No servers configured",
+			"Start with --servers PATH to monitor sing-box servers.")
+		return
+	}
+	cols, cardWidth, cardHeight := serverGridColumns(width)
+	rowsVisible := maxInt(height/cardHeight, 1)
+	app.serversPageSize = rowsVisible * cols
+	cursorRow := app.serverCursor / cols
+	if cursorRow < app.serverScroll {
+		app.serverScroll = cursorRow
+	}
+	if cursorRow >= app.serverScroll+rowsVisible {
+		app.serverScroll = cursorRow - rowsVisible + 1
+	}
+	for row := 0; row < rowsVisible; row++ {
+		for col := 0; col < cols; col++ {
+			index := (app.serverScroll+row)*cols + col
+			if index >= len(app.servers) {
+				return
+			}
+			drawServerCard(screen, x+col*cardWidth, y+row*cardHeight, cardWidth, cardHeight,
+				&app.servers[index], index == app.serverCursor)
+		}
+	}
+}
+
+func serverGridColumns(width int) (int, int, int) {
+	const (
+		minCardWidth = 30
+		cardHeight   = 5
+	)
+	cols := maxInt(width/minCardWidth, 1)
+	return cols, width / cols, cardHeight
+}
+
+func drawServerCard(screen tcell.Screen, x, y, width, height int, monitor *ServerMonitor, selected bool) {
+	title := monitor.Entry.Name
+	titleColor := colorYellow
+	switch {
+	case monitor.Err != "":
+		titleColor = colorRed
+	case monitor.Status != nil:
+		titleColor = colorGreen
+	}
+	if selected {
+		title = "> " + title
+	}
+	drawBox(screen, x, y, width, height, "")
+	drawText(screen, x+2, y, width-4, " "+truncate(title, width-6)+" ",
+		cellStyle(titleColor, colorBackground).Bold(true))
+	if height < 3 {
+		return
+	}
+	if monitor.Status != nil {
+		if height >= 3 {
+			upLine := fmt.Sprintf("UP %-12s %s", formatRate(monitor.Status.Uplink), formatBytes(monitor.Status.UplinkTotal))
+			drawText(screen, x+2, y+2, width-4, upLine, cellStyle(colorGreen, colorBackground))
+		}
+		if height >= 4 {
+			downLine := fmt.Sprintf("DN %-12s %s", formatRate(monitor.Status.Downlink), formatBytes(monitor.Status.DownlinkTotal))
+			drawText(screen, x+2, y+3, width-4, downLine, cellStyle(colorAccent, colorBackground))
+		}
+		return
+	}
+	state := "connecting..."
+	stateColor := colorYellow
+	if monitor.Err != "" {
+		state = truncate("offline: "+monitor.Err, maxInt(width-4, 0))
+		stateColor = colorRed
+	}
+	drawText(screen, x+2, y+2, width-4, state, cellStyle(stateColor, colorBackground))
+}
+
 func drawPlaceholder(screen tcell.Screen, x, y, width, height int, title, detail string) {
 	boxWidth := minInt(maxInt(width-4, 24), 64)
 	boxHeight := minInt(maxInt(height-2, 5), 7)
@@ -533,6 +612,7 @@ func drawHelp(screen tcell.Screen, width, height int) {
 		"Connections: Up/Down, Enter, c, C",
 		"Logs:      Up/Down, PgUp/PgDn, Home/End, f, a, c",
 		"Settings:  Up/Down, Enter/e, text editing, c, d",
+		"Servers:   Up/Down, PgUp/PgDn, Home/End",
 		"",
 		"Press ? or Esc to close.",
 	}

@@ -21,6 +21,7 @@ const (
 	ViewConnections
 	ViewLogs
 	ViewSettings
+	ViewServers
 )
 
 func (v View) title() string {
@@ -35,6 +36,8 @@ func (v View) title() string {
 		return "Logs"
 	case ViewSettings:
 		return "Settings"
+	case ViewServers:
+		return "Servers"
 	default:
 		return ""
 	}
@@ -74,6 +77,7 @@ const (
 	NetworkConnections
 	NetworkLogs
 	NetworkAction
+	NetworkServerStatus
 )
 
 type NetworkEvent struct {
@@ -91,7 +95,17 @@ type NetworkEvent struct {
 	Connections   []ConnectionEventsInfo
 	Logs          []LogsInfo
 
-	Action ActionKind
+	Action      ActionKind
+	ServerIndex int
+}
+
+type ServerMonitor struct {
+	Entry     ServerEntry
+	Client    *APIClient
+	Connected bool
+	Status    *StatusInfo
+	Err       string
+	Busy      bool
 }
 
 type App struct {
@@ -128,6 +142,11 @@ type App struct {
 	settingsEditing  bool
 	settingsCursor   int
 	settingsOriginal string
+
+	servers         []ServerMonitor
+	serverCursor    int
+	serverScroll    int
+	serversPageSize int
 
 	message string
 	error   string
@@ -314,7 +333,49 @@ func (a *App) pollAll(tx chan<- NetworkEvent) {
 	a.pollGroups(tx)
 	a.pollConnections(tx)
 	a.pollLogs(tx)
+	a.pollServers(tx)
 	a.message = "refresh requested"
+}
+
+func (a *App) loadServers(path string) {
+	entries := loadServerEntries(path)
+	monitors := make([]ServerMonitor, 0, len(entries))
+	for _, entry := range entries {
+		monitor := ServerMonitor{Entry: entry}
+		client, err := newAPIClient(APIConfig{URL: entry.BaseURL})
+		if err != nil {
+			monitor.Err = err.Error()
+		} else {
+			monitor.Client = client
+		}
+		monitors = append(monitors, monitor)
+	}
+	a.servers = monitors
+	a.serverCursor = 0
+	a.serverScroll = 0
+}
+
+func (a *App) pollServers(tx chan<- NetworkEvent) {
+	for index := range a.servers {
+		monitor := &a.servers[index]
+		if monitor.Busy || monitor.Client == nil {
+			continue
+		}
+		monitor.Busy = true
+		client := monitor.Client
+		go func(index int) {
+			values, err := client.subscribeStatus()
+			event := NetworkEvent{Kind: NetworkServerStatus, ServerIndex: index, Err: err}
+			if err == nil {
+				if len(values) == 0 {
+					event.Err = fmt.Errorf("no status data received")
+				} else {
+					event.Status = values[len(values)-1]
+				}
+			}
+			tx <- event
+		}(index)
+	}
 }
 
 func (a *App) resetBusy() {
@@ -329,6 +390,12 @@ func (a *App) resetBusy() {
 }
 
 func (a *App) handleNetwork(event NetworkEvent, tx chan<- NetworkEvent) {
+	// Server monitors are independent of the main client connection, so
+	// their events bypass the generation gate below.
+	if event.Kind == NetworkServerStatus {
+		a.handleServerStatus(event)
+		return
+	}
 	if event.Generation != a.generation {
 		return
 	}
@@ -464,6 +531,23 @@ func appendBounded(values []int64, value int64, limit int) []int64 {
 	return values
 }
 
+func (a *App) handleServerStatus(event NetworkEvent) {
+	if event.ServerIndex < 0 || event.ServerIndex >= len(a.servers) {
+		return
+	}
+	monitor := &a.servers[event.ServerIndex]
+	monitor.Busy = false
+	if event.Err != nil {
+		monitor.Connected = false
+		monitor.Err = event.Err.Error()
+		return
+	}
+	status := event.Status
+	monitor.Connected = true
+	monitor.Status = &status
+	monitor.Err = ""
+}
+
 func (a *App) handleKey(event *tcell.EventKey, tx chan<- NetworkEvent) {
 	if a.help {
 		if event.Key() == tcell.KeyEscape || event.Rune() == '?' {
@@ -507,6 +591,8 @@ func (a *App) handleKey(event *tcell.EventKey, tx chan<- NetworkEvent) {
 			a.view = ViewLogs
 		case '5':
 			a.view = ViewSettings
+		case '6':
+			a.view = ViewServers
 		case 'r':
 			a.pollAll(tx)
 		default:
@@ -519,6 +605,8 @@ func (a *App) handleKey(event *tcell.EventKey, tx chan<- NetworkEvent) {
 				a.handleLogsKey(event, tx)
 			case ViewSettings:
 				a.handleSettingsKey(event, tx)
+			case ViewServers:
+				a.handleServersKey(event)
 			}
 		}
 	}
@@ -645,6 +733,31 @@ func (a *App) handleLogsKey(event *tcell.EventKey, tx chan<- NetworkEvent) {
 			a.startAction(tx, ActionClearLogs, "clearing logs", func(client *APIClient) error {
 				return client.clearLogs()
 			})
+		}
+	}
+}
+
+func (a *App) handleServersKey(event *tcell.EventKey) {
+	page := maxInt(a.serversPageSize, 1)
+	count := len(a.servers)
+	switch event.Key() {
+	case tcell.KeyUp:
+		a.serverCursor = maxInt(a.serverCursor-1, 0)
+	case tcell.KeyDown:
+		if count > 0 {
+			a.serverCursor = minInt(a.serverCursor+1, count-1)
+		}
+	case tcell.KeyPgUp:
+		a.serverCursor = maxInt(a.serverCursor-page, 0)
+	case tcell.KeyPgDn:
+		if count > 0 {
+			a.serverCursor = minInt(a.serverCursor+page, count-1)
+		}
+	case tcell.KeyHome:
+		a.serverCursor = 0
+	case tcell.KeyEnd:
+		if count > 0 {
+			a.serverCursor = count - 1
 		}
 	}
 }
@@ -955,11 +1068,11 @@ func (a *App) clampConnectionCursor() {
 }
 
 func (a *App) nextView() {
-	a.view = View((int(a.view) + 1) % 5)
+	a.view = View((int(a.view) + 1) % 6)
 }
 
 func (a *App) previousView() {
-	a.view = View((int(a.view) + 4) % 5)
+	a.view = View((int(a.view) + 5) % 6)
 }
 
 func serviceStatusLabel(status ServiceStatusInfo) string {

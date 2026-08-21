@@ -41,6 +41,9 @@ func main() {
 	terminalEvents := make(chan tcell.Event, 32)
 	go screen.ChannelEvents(terminalEvents, terminalQuit)
 
+	app.loadServers(cli.ServersPath)
+	app.pollServers(networkEvents)
+
 	if cli.AutoConnect {
 		app.connect(networkEvents)
 	}
@@ -57,6 +60,8 @@ func main() {
 	defer logsTicker.Stop()
 	metadataTicker := time.NewTicker(15 * time.Second)
 	defer metadataTicker.Stop()
+	serversTicker := time.NewTicker(2 * time.Second)
+	defer serversTicker.Stop()
 
 	drawScreen(screen, app)
 	for !app.shouldQuit {
@@ -73,6 +78,8 @@ func main() {
 			app.pollLogs(networkEvents)
 		case <-metadataTicker.C:
 			app.pollMetadata(networkEvents)
+		case <-serversTicker.C:
+			app.pollServers(networkEvents)
 		case event, ok := <-terminalEvents:
 			if !ok {
 				app.shouldQuit = true
