@@ -135,7 +135,7 @@ type App struct {
 	connectionCursor int
 	showDetails      bool
 
-	logs        []LogRow
+	logs        []LogEntryInfo
 	logMinLevel int32
 	logFollow   bool
 	logOffset   int
@@ -149,6 +149,16 @@ type App struct {
 	serverCursor    int
 	serverScroll    int
 	serversPageSize int
+
+	cachedGroupRows []GroupRow
+
+	logsFiltered []LogEntryInfo
+	logsStale    bool
+
+	connIDs       []string
+	connActive    int
+	connUplinkAgg int64
+	connDownAgg   int64
 
 	message string
 	error   string
@@ -237,21 +247,35 @@ func (a *App) disconnect() {
 	a.connections = make(map[string]ConnectionRow)
 	a.logs = nil
 	a.expanded = make(map[string]bool)
+	a.invalidateGroups()
+	a.markLogsStale()
+	a.rebuildConnectionIndex()
 	a.resetBusy()
 	a.message = "disconnected"
 	a.error = ""
 }
 
-func (a *App) pollStatus(tx chan<- NetworkEvent) {
-	if a.statusBusy || a.client == nil {
+// pollAsync schedules one bounded poll unless an identical request is
+// still in flight or the client went away.
+func (a *App) pollAsync(tx chan<- NetworkEvent, busy *bool, kind NetworkKind, fetch func(*APIClient) NetworkEvent) {
+	if *busy || a.client == nil {
 		return
 	}
+	*busy = true
 	client := a.client
 	generation := a.generation
-	a.statusBusy = true
 	go func() {
+		event := fetch(client)
+		event.Kind = kind
+		event.Generation = generation
+		tx <- event
+	}()
+}
+
+func (a *App) pollStatus(tx chan<- NetworkEvent) {
+	a.pollAsync(tx, &a.statusBusy, NetworkStatus, func(client *APIClient) NetworkEvent {
 		values, err := client.subscribeStatus()
-		event := NetworkEvent{Kind: NetworkStatus, Generation: generation, Err: err}
+		event := NetworkEvent{Err: err}
 		if err == nil {
 			if len(values) == 0 {
 				event.Err = fmt.Errorf("no status data received")
@@ -259,90 +283,53 @@ func (a *App) pollStatus(tx chan<- NetworkEvent) {
 				event.Status = values[len(values)-1]
 			}
 		}
-		tx <- event
-	}()
+		return event
+	})
 }
 
 func (a *App) pollMetadata(tx chan<- NetworkEvent) {
-	if !a.serviceBusy && a.client != nil {
-		client := a.client
-		generation := a.generation
-		a.serviceBusy = true
-		go func() {
-			values, err := client.subscribeServiceStatus()
-			event := NetworkEvent{Kind: NetworkServiceStatus, Generation: generation, Err: err}
-			if err == nil {
-				if len(values) == 0 {
-					event.Err = fmt.Errorf("no service status received")
-				} else {
-					event.ServiceStatus = values[len(values)-1]
-				}
+	a.pollAsync(tx, &a.serviceBusy, NetworkServiceStatus, func(client *APIClient) NetworkEvent {
+		values, err := client.subscribeServiceStatus()
+		event := NetworkEvent{Err: err}
+		if err == nil {
+			if len(values) == 0 {
+				event.Err = fmt.Errorf("no service status received")
+			} else {
+				event.ServiceStatus = values[len(values)-1]
 			}
-			tx <- event
-		}()
-	}
-	if !a.startedBusy && a.client != nil {
-		client := a.client
-		generation := a.generation
-		a.startedBusy = true
-		go func() {
-			startedAt, err := client.getStartedAt()
-			tx <- NetworkEvent{
-				Kind:       NetworkStartedAt,
-				Generation: generation,
-				StartedAt:  startedAt,
-				Err:        err,
-			}
-		}()
-	}
+		}
+		return event
+	})
+	a.pollAsync(tx, &a.startedBusy, NetworkStartedAt, func(client *APIClient) NetworkEvent {
+		startedAt, err := client.getStartedAt()
+		return NetworkEvent{StartedAt: startedAt, Err: err}
+	})
 }
 
 func (a *App) pollGroups(tx chan<- NetworkEvent) {
-	if !a.groupsBusy && a.client != nil {
-		client := a.client
-		generation := a.generation
-		epoch := a.groupsEpoch
-		a.groupsBusy = true
-		go func() {
-			groups, err := client.subscribeGroups()
-			tx <- NetworkEvent{Kind: NetworkGroups, Generation: generation, Groups: groups, Err: err, Epoch: epoch}
-		}()
-	}
-	if !a.clashBusy && a.client != nil {
-		client := a.client
-		generation := a.generation
-		a.clashBusy = true
-		go func() {
-			mode, err := client.getClashModeStatus()
-			tx <- NetworkEvent{Kind: NetworkClashMode, Generation: generation, ClashMode: mode, Err: err}
-		}()
-	}
+	epoch := a.groupsEpoch // captured synchronously so later bumps cannot leak in
+	a.pollAsync(tx, &a.groupsBusy, NetworkGroups, func(client *APIClient) NetworkEvent {
+		groups, err := client.subscribeGroups()
+		return NetworkEvent{Groups: groups, Err: err, Epoch: epoch}
+	})
+	a.pollAsync(tx, &a.clashBusy, NetworkClashMode, func(client *APIClient) NetworkEvent {
+		mode, err := client.getClashModeStatus()
+		return NetworkEvent{ClashMode: mode, Err: err}
+	})
 }
 
 func (a *App) pollConnections(tx chan<- NetworkEvent) {
-	if a.connectionsBusy || a.client == nil {
-		return
-	}
-	client := a.client
-	generation := a.generation
-	a.connectionsBusy = true
-	go func() {
+	a.pollAsync(tx, &a.connectionsBusy, NetworkConnections, func(client *APIClient) NetworkEvent {
 		values, err := client.subscribeConnections()
-		tx <- NetworkEvent{Kind: NetworkConnections, Generation: generation, Connections: values, Err: err}
-	}()
+		return NetworkEvent{Connections: values, Err: err}
+	})
 }
 
 func (a *App) pollLogs(tx chan<- NetworkEvent) {
-	if a.logsBusy || a.client == nil {
-		return
-	}
-	client := a.client
-	generation := a.generation
-	a.logsBusy = true
-	go func() {
+	a.pollAsync(tx, &a.logsBusy, NetworkLogs, func(client *APIClient) NetworkEvent {
 		values, err := client.subscribeLogs()
-		tx <- NetworkEvent{Kind: NetworkLogs, Generation: generation, Logs: values, Err: err}
-	}()
+		return NetworkEvent{Logs: values, Err: err}
+	})
 }
 
 func (a *App) pollAll(tx chan<- NetworkEvent) {
@@ -441,6 +428,9 @@ func (a *App) handleNetwork(event NetworkEvent, tx chan<- NetworkEvent) {
 		a.connections = make(map[string]ConnectionRow)
 		a.logs = nil
 		a.expanded = make(map[string]bool)
+		a.invalidateGroups()
+		a.markLogsStale()
+		a.rebuildConnectionIndex()
 		a.error = ""
 		a.message = fmt.Sprintf("connected to sing-box %s (API v%d)", version.Version, version.APIVersion)
 		if err := saveConfig(a.config); err != nil {
@@ -486,6 +476,7 @@ func (a *App) handleNetwork(event NetworkEvent, tx chan<- NetworkEvent) {
 			// overwrite the newer state that the mutation produced.
 			a.appliedGroups = event.Epoch
 			a.groups = event.Groups
+			a.invalidateGroups()
 			a.clampGroupCursor()
 		}
 
@@ -522,21 +513,13 @@ func (a *App) handleNetwork(event NetworkEvent, tx chan<- NetworkEvent) {
 		a.error = ""
 		switch event.Action {
 		case ActionSelectOutbound:
-			a.message = "outbound selected"
-			a.groupsEpoch++
-			a.pollGroups(tx)
+			a.finishGroupAction("outbound selected", tx)
 		case ActionURLTest:
-			a.message = "URL test completed"
-			a.groupsEpoch++
-			a.pollGroups(tx)
+			a.finishGroupAction("URL test completed", tx)
 		case ActionExpandGroup:
-			a.message = "group display updated"
-			a.groupsEpoch++
-			a.pollGroups(tx)
+			a.finishGroupAction("group display updated", tx)
 		case ActionSetClashMode:
-			a.message = "Clash mode updated"
-			a.groupsEpoch++
-			a.pollGroups(tx)
+			a.finishGroupAction("Clash mode updated", tx)
 		case ActionCloseConnection:
 			a.message = "connection close requested"
 			a.pollConnections(tx)
@@ -546,8 +529,18 @@ func (a *App) handleNetwork(event NetworkEvent, tx chan<- NetworkEvent) {
 		case ActionClearLogs:
 			a.message = "logs cleared"
 			a.logs = nil
+			a.markLogsStale()
 		}
 	}
+}
+
+// finishGroupAction records the outcome of an action that changes group
+// data, bumps the epoch so in-flight pre-action snapshots are dropped,
+// and schedules a fresh groups fetch.
+func (a *App) finishGroupAction(message string, tx chan<- NetworkEvent) {
+	a.message = message
+	a.groupsEpoch++
+	a.pollGroups(tx)
 }
 
 func appendBounded(values []int64, value int64, limit int) []int64 {
@@ -685,6 +678,7 @@ func (a *App) handleGroupsKey(event *tcell.EventKey, tx chan<- NetworkEvent) {
 			group := a.groups[row.GroupIndex]
 			nextExpand := !a.groupIsExpanded(group)
 			a.expanded[group.Tag] = nextExpand
+			a.invalidateGroups()
 			a.clampGroupCursor()
 			groupTag := group.Tag
 			a.startAction(tx, ActionExpandGroup, "", func(client *APIClient) error {
@@ -756,6 +750,7 @@ func (a *App) handleLogsKey(event *tcell.EventKey, tx chan<- NetworkEvent) {
 			if a.logMinLevel > 6 {
 				a.logMinLevel = 0
 			}
+			a.markLogsStale()
 		case 'a':
 			a.logFollow = !a.logFollow
 			if a.logFollow {
@@ -928,17 +923,27 @@ func (a *App) cycleClashMode(tx chan<- NetworkEvent, direction int) {
 	})
 }
 
+// groupRows caches the flattened group/item row list; it only changes
+// when the groups snapshot or a local expand toggle lands, both of
+// which call invalidateGroups.
 func (a *App) groupRows() []GroupRow {
-	rows := make([]GroupRow, 0)
-	for groupIndex, group := range a.groups {
-		rows = append(rows, GroupRow{GroupIndex: groupIndex})
-		if a.groupIsExpanded(group) {
-			for itemIndex := range group.Items {
-				rows = append(rows, GroupRow{GroupIndex: groupIndex, ItemIndex: itemIndex, IsItem: true})
+	if a.cachedGroupRows == nil {
+		rows := make([]GroupRow, 0)
+		for groupIndex, group := range a.groups {
+			rows = append(rows, GroupRow{GroupIndex: groupIndex})
+			if a.groupIsExpanded(group) {
+				for itemIndex := range group.Items {
+					rows = append(rows, GroupRow{GroupIndex: groupIndex, ItemIndex: itemIndex, IsItem: true})
+				}
 			}
 		}
+		a.cachedGroupRows = rows
 	}
-	return rows
+	return a.cachedGroupRows
+}
+
+func (a *App) invalidateGroups() {
+	a.cachedGroupRows = nil
 }
 
 func (a *App) selectedGroupRow() (GroupRow, bool) {
@@ -949,63 +954,71 @@ func (a *App) selectedGroupRow() (GroupRow, bool) {
 	return rows[a.groupCursor], true
 }
 
-func (a *App) connectionIDs() []string {
+// rebuildConnectionIndex recomputes the sorted ID list and the
+// aggregates shown in the connections header in a single pass. It runs
+// when a connection batch lands instead of once per drawn frame.
+func (a *App) rebuildConnectionIndex() {
 	ids := make([]string, 0, len(a.connections))
-	for id := range a.connections {
+	active := 0
+	var uplink, downlink int64
+	for id, row := range a.connections {
 		ids = append(ids, id)
+		if !row.Closed {
+			active++
+			uplink += maxInt64(row.UplinkRate, 0)
+			downlink += maxInt64(row.DownlinkRate, 0)
+		}
 	}
 	sort.Strings(ids)
-	return ids
+	a.connIDs = ids
+	a.connActive = active
+	a.connUplinkAgg = uplink
+	a.connDownAgg = downlink
+}
+
+func (a *App) connectionIDs() []string {
+	return a.connIDs
 }
 
 func (a *App) selectedConnection() (string, ConnectionRow, bool) {
-	ids := a.connectionIDs()
-	if a.connectionCursor < 0 || a.connectionCursor >= len(ids) {
+	if a.connectionCursor < 0 || a.connectionCursor >= len(a.connIDs) {
 		return "", ConnectionRow{}, false
 	}
-	id := ids[a.connectionCursor]
+	id := a.connIDs[a.connectionCursor]
 	row, ok := a.connections[id]
 	return id, row, ok
 }
 
 func (a *App) activeConnectionCount() int {
-	count := 0
-	for _, row := range a.connections {
-		if !row.Closed {
-			count++
-		}
-	}
-	return count
+	return a.connActive
 }
 
 func (a *App) connectionUplink() int64 {
-	var value int64
-	for _, row := range a.connections {
-		if !row.Closed {
-			value += maxInt64(row.UplinkRate, 0)
-		}
-	}
-	return value
+	return a.connUplinkAgg
 }
 
 func (a *App) connectionDownlink() int64 {
-	var value int64
-	for _, row := range a.connections {
-		if !row.Closed {
-			value += maxInt64(row.DownlinkRate, 0)
-		}
-	}
-	return value
+	return a.connDownAgg
 }
 
-func (a *App) filteredLogs() []LogRow {
-	values := make([]LogRow, 0, len(a.logs))
-	for _, entry := range a.logs {
-		if entry.Level <= a.logMinLevel {
-			values = append(values, entry)
+// filteredLogs caches the level-filtered view and only rebuilds after
+// new logs arrive or the filter level changes (logsStale).
+func (a *App) filteredLogs() []LogEntryInfo {
+	if a.logsStale {
+		values := make([]LogEntryInfo, 0, len(a.logs))
+		for _, entry := range a.logs {
+			if entry.Level <= a.logMinLevel {
+				values = append(values, entry)
+			}
 		}
+		a.logsFiltered = values
+		a.logsStale = false
 	}
-	return values
+	return a.logsFiltered
+}
+
+func (a *App) markLogsStale() {
+	a.logsStale = true
 }
 
 func (a *App) logStart(total, height int) int {
@@ -1030,6 +1043,7 @@ func (a *App) applyConnectionBatches(batches []ConnectionEventsInfo) {
 			a.applyConnectionEvent(event)
 		}
 	}
+	a.rebuildConnectionIndex()
 }
 
 func (a *App) applyConnectionEvent(event ConnectionEventInfo) {
@@ -1077,13 +1091,12 @@ func (a *App) applyLogBatches(batches []LogsInfo) {
 		if batch.Reset {
 			a.logs = nil
 		}
-		for _, entry := range batch.Messages {
-			a.logs = append(a.logs, LogRow{Level: entry.Level, Message: entry.Message})
-		}
+		a.logs = append(a.logs, batch.Messages...)
 	}
 	if len(a.logs) > maxLogs {
 		a.logs = a.logs[len(a.logs)-maxLogs:]
 	}
+	a.markLogsStale()
 }
 
 func (a *App) clampGroupCursor() {

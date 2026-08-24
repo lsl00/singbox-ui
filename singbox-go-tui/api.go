@@ -118,9 +118,6 @@ func (c *APIClient) serverStream(method string, frame []byte, duration time.Dura
 				return nil, parseErr
 			}
 			messages = append(messages, frames...)
-			if len(messages) > maxStreamMessages {
-				return nil, errors.New("gRPC stream contained too many messages")
-			}
 		}
 		if readErr == nil {
 			continue

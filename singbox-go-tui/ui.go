@@ -717,9 +717,6 @@ func drawText(screen tcell.Screen, x, y, width int, text string, style tcell.Sty
 		runes = runes[:width]
 	}
 	for index, value := range runes {
-		if x+index < 0 {
-			continue
-		}
 		screen.SetContent(x+index, y, value, nil, style)
 	}
 }

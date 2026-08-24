@@ -24,7 +24,7 @@ go build -trimpath -o singbox-go-tui .
 旧 Linux 建议使用无 CGO 构建：
 
 ```bash
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o singbox-go-tui .
+CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w" -o singbox-go-tui .
 ```
 
 也可以执行项目内的 `build-local.sh`。该脚本默认构建 Linux amd64，可以通过

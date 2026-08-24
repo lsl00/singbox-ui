@@ -203,10 +203,6 @@ func appendInt64(dst []byte, field int, value int64) []byte {
 	return appendVarint(dst, uint64(value))
 }
 
-func appendInt32(dst []byte, field int, value int32) []byte {
-	return appendInt64(dst, field, int64(value))
-}
-
 func appendBool(dst []byte, field int, value bool) []byte {
 	if !value {
 		return dst
@@ -575,10 +571,6 @@ func decodeConnection(data []byte) (ConnectionInfo, error) {
 			value.Inbound, err = readString(&r, wireType)
 		case 3:
 			value.InboundType, err = readString(&r, wireType)
-		case 4:
-			v, readErr := readInt64(&r, wireType)
-			err = readErr
-			value.IPVersion = int32(v)
 		case 5:
 			value.Network, err = readString(&r, wireType)
 		case 6:
@@ -589,22 +581,8 @@ func decodeConnection(data []byte) (ConnectionInfo, error) {
 			value.Domain, err = readString(&r, wireType)
 		case 9:
 			value.Protocol, err = readString(&r, wireType)
-		case 10:
-			value.User, err = readString(&r, wireType)
-		case 11:
-			value.FromOutbound, err = readString(&r, wireType)
 		case 12:
 			value.CreatedAt, err = readInt64(&r, wireType)
-		case 13:
-			value.ClosedAt, err = readInt64(&r, wireType)
-		case 14:
-			value.Uplink, err = readInt64(&r, wireType)
-		case 15:
-			value.Downlink, err = readInt64(&r, wireType)
-		case 16:
-			value.UplinkTotal, err = readInt64(&r, wireType)
-		case 17:
-			value.DownlinkTotal, err = readInt64(&r, wireType)
 		case 18:
 			value.Rule, err = readString(&r, wireType)
 		case 19:

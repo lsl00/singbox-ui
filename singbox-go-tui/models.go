@@ -44,27 +44,19 @@ type ClashModeInfo struct {
 }
 
 type ConnectionInfo struct {
-	ID            string
-	Inbound       string
-	InboundType   string
-	IPVersion     int32
-	Network       string
-	Source        string
-	Destination   string
-	Domain        string
-	Protocol      string
-	User          string
-	FromOutbound  string
-	CreatedAt     int64
-	ClosedAt      int64
-	Uplink        int64
-	Downlink      int64
-	UplinkTotal   int64
-	DownlinkTotal int64
-	Rule          string
-	Outbound      string
-	OutboundType  string
-	ChainList     []string
+	ID           string
+	Inbound      string
+	InboundType  string
+	Network      string
+	Source       string
+	Destination  string
+	Domain       string
+	Protocol     string
+	CreatedAt    int64
+	Rule         string
+	Outbound     string
+	OutboundType string
+	ChainList    []string
 }
 
 type ConnectionEventInfo struct {
@@ -97,9 +89,4 @@ type ConnectionRow struct {
 	DownlinkRate int64
 	ClosedAt     int64
 	Closed       bool
-}
-
-type LogRow struct {
-	Level   int32
-	Message string
 }
