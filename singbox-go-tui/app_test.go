@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 func TestStaleGroupsSnapshotDiscarded(t *testing.T) {
@@ -99,6 +101,58 @@ func TestStartActionReportsBusyAndRunsWhenFree(t *testing.T) {
 	}
 	if !called {
 		t.Fatalf("action should have run")
+	}
+}
+
+func TestLocalExpandToggleOverridesServerState(t *testing.T) {
+	app := newApp(APIConfig{URL: defaultAPIURL})
+	client, err := newAPIClient(APIConfig{URL: defaultAPIURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.client = client
+	// Server reports collapsed (e.g. no cache_file configured).
+	app.groups = []GroupInfo{
+		{Tag: "proxy", IsExpand: false, Items: []GroupItemInfo{{Tag: "a"}, {Tag: "b"}}},
+	}
+
+	tx := make(chan NetworkEvent, 8)
+	app.handleGroupsKey(tcell.NewEventKey(tcell.KeyRune, 'x', 0), tx)
+
+	if !app.groupIsExpanded(app.groups[0]) {
+		t.Fatalf("toggle should expand locally")
+	}
+	rows := app.groupRows()
+	if len(rows) != 3 {
+		t.Fatalf("expanded group should expose item rows, got %d", len(rows))
+	}
+	select {
+	case event := <-tx:
+		if event.Kind != NetworkAction || event.Action != ActionExpandGroup {
+			t.Fatalf("unexpected event: %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("expand action event missing")
+	}
+
+	app.handleGroupsKey(tcell.NewEventKey(tcell.KeyRune, 'x', 0), tx)
+	if app.groupIsExpanded(app.groups[0]) {
+		t.Fatalf("second toggle should collapse again")
+	}
+	if rows := app.groupRows(); len(rows) != 1 {
+		t.Fatalf("collapsed group should hide items, got %d rows", len(rows))
+	}
+}
+
+func TestGroupIsExpandedPrefersServerWhenNoOverride(t *testing.T) {
+	app := newApp(APIConfig{URL: defaultAPIURL})
+	group := GroupInfo{Tag: "proxy", IsExpand: true}
+	if !app.groupIsExpanded(group) {
+		t.Fatalf("server expand state should apply without local override")
+	}
+	app.expanded["other"] = true
+	if app.groupIsExpanded(group) != group.IsExpand {
+		t.Fatalf("override for another tag must not leak")
 	}
 }
 

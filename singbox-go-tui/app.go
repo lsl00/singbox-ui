@@ -129,6 +129,7 @@ type App struct {
 	groups      []GroupInfo
 	groupCursor int
 	clashMode   *ClashModeInfo
+	expanded    map[string]bool
 
 	connections      map[string]ConnectionRow
 	connectionCursor int
@@ -173,7 +174,19 @@ func newApp(config APIConfig) *App {
 		logMinLevel: 2,
 		logFollow:   true,
 		generation:  1,
+		expanded:    make(map[string]bool),
 	}
+}
+
+// groupIsExpanded overlays session-local expand toggles onto the server
+// state. sing-box only persists expand flags when a cache_file is
+// configured; without one SetGroupExpand succeeds but SubscribeGroups
+// keeps reporting isExpand=false, so the client must track its own.
+func (a *App) groupIsExpanded(group GroupInfo) bool {
+	if expanded, ok := a.expanded[group.Tag]; ok {
+		return expanded
+	}
+	return group.IsExpand
 }
 
 func (a *App) connect(tx chan<- NetworkEvent) {
@@ -223,6 +236,7 @@ func (a *App) disconnect() {
 	a.clashMode = nil
 	a.connections = make(map[string]ConnectionRow)
 	a.logs = nil
+	a.expanded = make(map[string]bool)
 	a.resetBusy()
 	a.message = "disconnected"
 	a.error = ""
@@ -426,6 +440,7 @@ func (a *App) handleNetwork(event NetworkEvent, tx chan<- NetworkEvent) {
 		a.clashMode = nil
 		a.connections = make(map[string]ConnectionRow)
 		a.logs = nil
+		a.expanded = make(map[string]bool)
 		a.error = ""
 		a.message = fmt.Sprintf("connected to sing-box %s (API v%d)", version.Version, version.APIVersion)
 		if err := saveConfig(a.config); err != nil {
@@ -664,12 +679,17 @@ func (a *App) handleGroupsKey(event *tcell.EventKey, tx chan<- NetworkEvent) {
 			}
 		case 'x':
 			row, ok := a.selectedGroupRow()
-			if ok && row.GroupIndex < len(a.groups) {
-				group := a.groups[row.GroupIndex]
-				a.startAction(tx, ActionExpandGroup, "", func(client *APIClient) error {
-					return client.setGroupExpand(group.Tag, !group.IsExpand)
-				})
+			if !ok || row.GroupIndex >= len(a.groups) {
+				return
 			}
+			group := a.groups[row.GroupIndex]
+			nextExpand := !a.groupIsExpanded(group)
+			a.expanded[group.Tag] = nextExpand
+			a.clampGroupCursor()
+			groupTag := group.Tag
+			a.startAction(tx, ActionExpandGroup, "", func(client *APIClient) error {
+				return client.setGroupExpand(groupTag, nextExpand)
+			})
 		case 'm', ']':
 			a.cycleClashMode(tx, 1)
 		case '[':
@@ -912,7 +932,7 @@ func (a *App) groupRows() []GroupRow {
 	rows := make([]GroupRow, 0)
 	for groupIndex, group := range a.groups {
 		rows = append(rows, GroupRow{GroupIndex: groupIndex})
-		if group.IsExpand {
+		if a.groupIsExpanded(group) {
 			for itemIndex := range group.Items {
 				rows = append(rows, GroupRow{GroupIndex: groupIndex, ItemIndex: itemIndex, IsItem: true})
 			}

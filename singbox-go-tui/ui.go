@@ -298,7 +298,7 @@ func drawGroups(screen tcell.Screen, x, y, width, height int, app *App) {
 		if !row.IsItem {
 			group := app.groups[row.GroupIndex]
 			marker := "[+]"
-			if group.IsExpand {
+			if app.groupIsExpanded(group) {
 				marker = "[-]"
 			}
 			selected := "readonly"
