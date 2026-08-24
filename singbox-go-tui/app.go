@@ -97,6 +97,7 @@ type NetworkEvent struct {
 
 	Action      ActionKind
 	ServerIndex int
+	Epoch       uint64
 }
 
 type ServerMonitor struct {
@@ -152,6 +153,8 @@ type App struct {
 	error   string
 
 	generation      uint64
+	groupsEpoch     uint64
+	appliedGroups   uint64
 	statusBusy      bool
 	serviceBusy     bool
 	startedBusy     bool
@@ -284,10 +287,11 @@ func (a *App) pollGroups(tx chan<- NetworkEvent) {
 	if !a.groupsBusy && a.client != nil {
 		client := a.client
 		generation := a.generation
+		epoch := a.groupsEpoch
 		a.groupsBusy = true
 		go func() {
 			groups, err := client.subscribeGroups()
-			tx <- NetworkEvent{Kind: NetworkGroups, Generation: generation, Groups: groups, Err: err}
+			tx <- NetworkEvent{Kind: NetworkGroups, Generation: generation, Groups: groups, Err: err, Epoch: epoch}
 		}()
 	}
 	if !a.clashBusy && a.client != nil {
@@ -461,7 +465,11 @@ func (a *App) handleNetwork(event NetworkEvent, tx chan<- NetworkEvent) {
 		a.groupsBusy = false
 		if event.Err != nil {
 			a.error = event.Err.Error()
-		} else {
+		} else if event.Epoch >= a.appliedGroups {
+			// Snapshots initiated before a recent mutation (expand, select,
+			// URL test, mode switch) carry an older epoch and must not
+			// overwrite the newer state that the mutation produced.
+			a.appliedGroups = event.Epoch
 			a.groups = event.Groups
 			a.clampGroupCursor()
 		}
@@ -500,15 +508,19 @@ func (a *App) handleNetwork(event NetworkEvent, tx chan<- NetworkEvent) {
 		switch event.Action {
 		case ActionSelectOutbound:
 			a.message = "outbound selected"
+			a.groupsEpoch++
 			a.pollGroups(tx)
 		case ActionURLTest:
 			a.message = "URL test completed"
+			a.groupsEpoch++
 			a.pollGroups(tx)
 		case ActionExpandGroup:
 			a.message = "group display updated"
+			a.groupsEpoch++
 			a.pollGroups(tx)
 		case ActionSetClashMode:
 			a.message = "Clash mode updated"
+			a.groupsEpoch++
 			a.pollGroups(tx)
 		case ActionCloseConnection:
 			a.message = "connection close requested"
@@ -851,7 +863,11 @@ func (a *App) setSettingsValue(value string) {
 }
 
 func (a *App) startAction(tx chan<- NetworkEvent, kind ActionKind, message string, action func(*APIClient) error) {
-	if a.actionBusy || a.client == nil {
+	if a.client == nil {
+		return
+	}
+	if a.actionBusy {
+		a.message = "previous action still in progress"
 		return
 	}
 	client := a.client
