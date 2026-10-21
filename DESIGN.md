@@ -1,456 +1,364 @@
-# sing-box Dashboard Design
+# mihomo-tui Design
 
-## 1. Project Overview
+## 1. Overview
 
-This project is a Tauri 2 desktop dashboard for sing-box 1.14+.
+`mihomo-tui` is a terminal dashboard for the mihomo kernel. It connects to
+the mihomo external controller over the Clash RESTful API and consumes the
+WebSocket streams the controller offers for traffic, memory, connections and
+logs.
 
-The application connects to the sing-box API service, which is a gRPC service that also accepts gRPC-Web requests. It provides:
+The design goals are:
 
-- Overview statistics and bandwidth history
-- Proxy group and selector management
-- Live connection inspection and connection closing
-- Log viewing and clearing
-- Clash mode switching
-- System tray integration
-- Tray bandwidth display
-- Proxy selector in the tray menu
-- Close-to-tray behavior
+- a single static binary that runs on old Linux systems, so no CGO, no
+  WebView and no desktop toolchain is involved
+- live data without polling, so the kernel pushes the samples
+- the same interaction model as the previous sing-box dashboard: a page per
+  topic, a shared footer with the key hints and a status line
 
-The default API endpoint is:
-
-```text
-http://localhost:9000
-```
-
-The first launch automatically attempts to connect to this endpoint. The connection URL and API secret are persisted in browser local storage by the frontend.
-
-## 2. Repository Layout
+## 2. Repository layout
 
 ```text
-singbox-dashboard/
-├── DESIGN.md
-├── package.json
-├── vite.config.ts
-├── src/
-│   ├── App.svelte
-│   ├── app.css
-│   ├── main.ts
-│   ├── lib/
-│   │   ├── api.ts
-│   │   ├── format.ts
-│   │   ├── stores.ts
-│   │   └── types.ts
-│   └── views/
-│       ├── Connections.svelte
-│       ├── Groups.svelte
-│       ├── Logs.svelte
-│       ├── Overview.svelte
-│       └── Settings.svelte
-└── src-tauri/
-    ├── Cargo.toml
-    ├── build.rs
-    ├── tauri.conf.json
-    ├── capabilities/default.json
-    ├── proto/started_service.proto
-    └── src/
-        ├── lib.rs
-        ├── main.rs
-        ├── state.rs
-        ├── commands/
-        ├── grpc/
-        └── tray/
+.
+├── main.go                  # entry point, terminal setup and event loop
+├── build-local.sh           # reproducible static build
+├── go.mod
+└── internal/
+    ├── clash/               # mihomo controller client
+    │   ├── client.go        # REST calls
+    │   ├── stream.go        # WebSocket streams
+    │   ├── types.go         # JSON models
+    │   └── client_test.go   # tests against a fake controller
+    ├── config/              # CLI parsing and persistence
+    │   ├── config.go
+    │   └── config_test.go
+    ├── singbox/             # sing-box gRPC-Web client
+    │   ├── client.go        # unary calls and the status stream
+    │   ├── proto.go         # gRPC-Web framing and protobuf codec
+    │   ├── client_test.go
+    │   └── live_test.go     # opt-in check against real instances
+    ├── app/                 # dashboard state machine
+    │   ├── app.go           # state, event handling, key handling
+    │   ├── actions.go       # write operations
+    │   ├── events.go        # event and action types
+    │   ├── servers.go       # monitored instances
+    │   ├── streams.go       # stream supervision
+    │   ├── app_test.go
+    │   └── integration_test.go
+    └── ui/                  # tcell rendering
+        ├── ui.go            # frame, header, footer, help
+        ├── overview.go
+        ├── groups.go
+        ├── connections.go
+        ├── logs.go
+        ├── settings.go
+        ├── servers.go
+        ├── widgets.go       # boxes, tables, sparkline, formatting
+        └── ui_test.go
 ```
 
-## 3. Runtime Architecture
+The dependency direction is `main -> ui -> app -> {clash, singbox} ->
+net/http`. The `ui` package never performs network calls, the `app` package
+never touches the terminal.
+
+## 3. Runtime architecture
 
 ```text
-┌─────────────────────────────────────────────┐
-│ Tauri application                            │
-│                                             │
-│  Svelte frontend                            │
-│  - views                                     │
-│  - stores                                    │
-│  - Tauri invoke/listen                       │
-│              ▲                 │             │
-│              │ events/commands │             │
-│              │                 ▼             │
-│  Rust backend                              │
-│  - gRPC-Web client                          │
-│  - background status monitor                 │
-│  - tray proxy monitor                        │
-│  - tray menu and title                       │
-└──────────────────────┬──────────────────────┘
-                       │ HTTP/1.1 gRPC-Web
-                       ▼
-              sing-box API :9000
+┌──────────────────────────── mihomo-tui ───────────────────────────┐
+│                                                                  │
+│  main loop (single goroutine)                                   │
+│    - tcell events        - app events        - periodic ticks     │
+│            │                    ▲                    │             │
+│            ▼                    │                    ▼             │
+│  app.App (state)  ◄────────────┴────────────────────┘             │
+│    - pages, cursors, filters                                    │
+│                                                                  │
+│  network goroutines                                             │
+│    - 4 WebSocket supervisors (traffic, memory, connections, logs)│
+│    - one-shot REST calls (proxies, configs, server monitors)     │
+│    - one gRPC-Web supervisor per monitored sing-box instance     │
+└──────────────────────────────────────────────────────────────────┘
+                │  HTTP/1.1 + WebSocket
+                ▼
+        mihomo external controller :9090
 ```
 
-The Rust backend owns the sing-box connection and the system tray. The frontend does not connect to sing-box directly. Frontend commands call Rust through Tauri IPC, and the Rust backend emits events for real-time status updates.
+The main loop is the only place that mutates the state. Network goroutines
+send results through a single `app.Event` channel, which keeps the state
+free of locks and makes the data flow easy to follow.
 
-## 4. sing-box API Protocol
+### Tick rates
 
-The sing-box 1.14 API is not REST. It is the `daemon.StartedService` gRPC service with gRPC-Web support.
+| Timer | Interval | Purpose |
+| --- | --- | --- |
+| draw | 100 ms | repaint the screen |
+| proxies | 3 s | refresh groups, nodes and latency history |
+| servers | 2 s | read the next sample of the monitored instances |
+| runtime | 15 s | refresh the running configuration |
 
-The client sends requests to paths such as:
+Traffic, memory, connections and logs are pushed by the kernel and need no
+polling at all.
 
-```text
-http://localhost:9000/daemon.StartedService/GetVersion
-http://localhost:9000/daemon.StartedService/SubscribeStatus
-```
+## 4. The controller protocol
 
-Required request headers:
+The mihomo external controller is a plain HTTP server.
 
-```text
-Content-Type: application/grpc-web+proto
-X-Grpc-Web: 1
-Authorization: Bearer <secret>    # only when a secret is configured
-```
+### Authentication
 
-The API secret is configured in sing-box's API service configuration. Empty secret means authentication is disabled.
+When a secret is configured, every request carries an
+`Authorization: Bearer <secret>` header. The controller also accepts a
+`token` query parameter for WebSocket upgrades, but the header works for
+both transports because the WebSocket client can set handshake headers.
 
-### gRPC-Web frame format
+### Streaming
 
-Every request and response message uses this frame:
+`/traffic`, `/memory`, `/connections` and `/logs` accept a WebSocket
+upgrade and then push one JSON document per frame.
+
+- `/traffic` pushes `{"up","down","upTotal","downTotal"}` once per second.
+  `up` and `down` are byte rates, `upTotal` and `downTotal` are cumulative
+  byte counters.
+- `/memory` pushes `{"inuse","oslimit"}` once per second. The controller
+  deliberately reports `0` for the very first sample, so the dashboard
+  ignores zero values.
+- `/connections` pushes a full snapshot once per second. The refresh rate
+  is configurable with `?interval=<milliseconds>`.
+- `/logs` pushes `{"type","payload"}` per line.
+
+The log level filter deserves a note. The controller drops every record
+whose level is below the requested one, and its level constants are
+ordered `DEBUG=0, INFO=1, WARNING=2, ERROR=3, SILENT=4`. A request for
+`?level=debug` therefore forwards everything the kernel produced, while
+the default `?level=info` would drop every warning and error. The
+dashboard always requests `?level=debug` and applies the severity filter
+itself, which keeps the filter switchable without reconnecting and works
+independently of the controller version.
+
+### Write operations
+
+| Operation | Request |
+| --- | --- |
+| switch mode | `PATCH /configs` with `{"mode":"global"}` |
+| reload configuration | `PUT /configs?force=true` with `{"path":"","payload":""}` |
+| restart kernel | `POST /restart` with `{"path":"","payload":""}` |
+| switch node | `PUT /proxies/{group}` with `{"name":"node"}` |
+| test node | `GET /proxies/{node}/delay?url=&timeout=` |
+| test group | `GET /group/{group}/delay?url=&timeout=` |
+| close connections | `DELETE /connections[/{id}]` |
+| flush caches | `POST /cache/dns/flush`, `POST /cache/fakeip/flush` |
+
+Two behaviours of the controller are worth remembering:
+
+- `PUT /configs` with an empty path reloads the configuration file the
+  kernel was started with. A path must be absolute and inside the
+  `SAFE_PATHS` of the kernel, otherwise the request is rejected.
+- `POST /restart` makes the kernel replace itself with a new process. The
+  controller answers first and disappears afterwards, so the dashboard has
+  to survive a short outage.
+- `GET /group/{group}/delay` clears the pinned selection of automatic
+  groups, so a group wide test is not free of side effects.
+
+### Proxy and group model
+
+A proxy is a policy group exactly when it carries an `all` list. Groups
+add `now`, `testUrl`, `fixed`, `hidden` and `emptyFallback` on top of the
+common fields. The dashboard uses `type == "Selector"` to decide whether a
+group can be switched manually.
+
+The controller returns the proxies as a map, so the dashboard sorts the
+group names alphabetically to get a stable order.
+
+## 5. The sing-box protocol
+
+The monitored instances run sing-box, which does not offer a RESTful API.
+It exposes the `daemon.StartedService` gRPC service over gRPC-Web, so the
+client has to speak the gRPC-Web framing and decode protobuf by hand.
+
+### Framing
+
+Every request and every response message uses the gRPC-Web frame:
 
 ```text
 1 byte  flags
 4 bytes message length, big-endian
 ```
 
-Response flags:
+The flags distinguish the data frames (`0x00`) from the trailer frames
+(`0x80`). A trailer carries the gRPC status, so a failed call surfaces as
+an error instead of an empty result.
 
-- `0x00`: protobuf data message
-- `0x80`: trailers / gRPC status metadata
-
-The Rust implementation manually handles this framing because the sing-box endpoint is gRPC-Web, while the desktop client uses `reqwest` rather than a native HTTP/2 tonic transport.
-
-## 5. Rust Backend
-
-### 5.1 `src-tauri/src/grpc/client.rs`
-
-`GrpcClient` owns:
-
-- A reusable `reqwest::Client`
-- API base URL
-- Optional bearer secret
-
-The HTTP client is configured with:
-
-- `.no_proxy()` so localhost API access does not accidentally go through the system proxy
-- 5 second connection timeout
-- 10 second request timeout
-
-The stream reader uses a total deadline, not a per-message deadline. This distinction is critical.
-
-Bad behavior:
+The requests are:
 
 ```text
-wait up to 1.5 seconds for every next message
+POST http://host:9000/daemon.StartedService/GetVersion
+POST http://host:9000/daemon.StartedService/SubscribeStatus
 ```
 
-For `SubscribeStatus` and `SubscribeConnections`, sing-box sends a message approximately every second, so this would never return.
+with the headers `Content-Type: application/grpc-web+proto` and
+`X-Grpc-Web: 1`. The body of the subscription is the
+`SubscribeStatusRequest` with the push interval in nanoseconds.
 
-Correct behavior:
+### Decoding
+
+The protobuf codec is limited to what the dashboard needs. The decoder
+walks the fields of a message, keeps the known ones and skips the rest.
+Only the `Version` and the `Status` message are decoded, so the codec
+stays small and no `protoc` and no generated code are needed.
+
+### The semantics of the status
+
+The `Status` message of sing-box is filled by `readStatus` and adjusted
+before every push:
+
+```go
+status := s.readStatus()
+uploadTotal := status.UplinkTotal
+downloadTotal := status.DownlinkTotal
+for {
+    server.Send(status)
+    <-ticker.C
+    status = s.readStatus()
+    upload := status.UplinkTotal - uploadTotal
+    download := status.DownlinkTotal - downloadTotal
+    status.Uplink = upload
+    status.Downlink = download
+}
+```
+
+Three details follow from this and are easy to get wrong:
+
+- `uplink` and `downlink` are the number of bytes transferred during the
+  last push interval, not a normalised rate. The dashboard divides them by
+  the interval to get bytes per second.
+- The first message of a subscription never carries a rate, because the
+  difference is only computed after the first tick. The probe discards
+  that message.
+- `connectionsIn` is the number of tracked connections and
+  `connectionsOut` the number of outbound connections.
+
+The decoder is verified against this invariant: the reported rate has to
+be the difference of the cumulative counters. The live test asserts it for
+every sample of every configured instance.
+
+### Reading the stream
+
+The subscription stays open, so the probe keeps it and only reads the next
+sample from it. Because the instance pushes a sample every interval and
+the dashboard polls less often, the newest sample wins and the older ones
+are discarded. Otherwise the reader would show an ever growing backlog.
+
+## 6. State handling
+
+### Generation gate
+
+Every event carries the generation of the connection it belongs to. A
+connection or a disconnect increments the generation, and events of an
+older generation are dropped. This keeps late responses of a previous
+controller from overwriting the state of the current one.
+
+### Busy flags
+
+Each kind of one-shot request has its own busy flag, so a slow response
+never leads to overlapping requests. Write operations share a single flag
+and are rejected with a visible message while one is running.
+
+### Stream supervision
+
+Each WebSocket stream runs in its own goroutine that reconnects with an
+exponential backoff of up to ten seconds. The supervisor is cancelled when
+the connection is closed or replaced, which is what makes the kernel
+restart and the configuration reload survivable: the streams drop, the
+supervisor retries, and the dashboard reconnects on its own.
+
+## 7. Pages
+
+| Page | Content |
+| --- | --- |
+| Overview | rate and total traffic, bandwidth sparkline, kernel memory, connection count, runtime mode, log level |
+| Proxy Groups | mode selector, group tree, node latency, node switching, latency tests |
+| Connections | connection table, detail panel, closing connections, sorting |
+| Logs | live log stream, severity filter, follow mode, scrolling |
+| Settings | controller URL, secret, configuration path, kernel actions |
+| Servers | grid of monitored instances with version, rates, totals, memory and connection count |
+
+### Bounded buffers
+
+| Buffer | Limit |
+| --- | --- |
+| rate history | 60 samples |
+| log lines | 2000 lines |
+| connections | 5000 entries |
+
+The log buffer keeps every line regardless of the filter, so lowering the
+filter reveals the earlier lines again.
+
+### Servers page
+
+The page supports two protocols. The protocol of an instance is part of
+its entry in the server list and defaults to sing-box.
+
+A sing-box instance is monitored over its gRPC-Web status stream, which
+the kernel pushes on its own. The subscription is opened once and kept
+open, so the traffic of the instance arrives without any polling.
+
+A mihomo instance is polled instead. A single `GET /connections` snapshot
+already contains the cumulative traffic counters and the kernel memory, so
+the transfer rate is derived from the difference between two polls. This
+keeps the page cheap even with many instances.
+
+## 8. Configuration
+
+The controller URL and the secret are stored in
+`~/.config/mihomo-tui/config` with `0600` permissions and written
+atomically. The precedence of the sources is
 
 ```text
-read messages for a total of 1.5 seconds, then return collected messages
+defaults -> configuration file -> environment -> command line flags
 ```
 
-The stream reader also limits memory usage:
+The environment variables are `MIHOMO_API_URL` and `MIHOMO_API_SECRET`.
 
-- Maximum pending stream buffer: 16 MiB
-- Maximum decoded stream messages per call: 4096
-
-### 5.2 Current backend API methods
-
-`GrpcClient` currently implements:
-
-- `get_version`
-- `subscribe_service_status`
-- `subscribe_status`
-- `subscribe_groups`
-- `subscribe_connections`
-- `subscribe_log`
-- `clear_logs`
-- `get_started_at`
-- `select_outbound`
-- `url_test`
-- `set_group_expand`
-- `close_connection`
-- `close_all_connections`
-- `get_clash_mode_status`
-- `set_clash_mode`
-
-Only APIs needed by the current application are kept in the local proto definition.
-
-### 5.3 `src-tauri/src/state.rs`
-
-`AppState` is managed by Tauri and contains:
-
-- Current `ApiConfig`
-- Optional shared `Arc<GrpcClient>`
-- `quitting` flag used by close-to-tray behavior
-
-The client is stored behind `RwLock<Option<Arc<GrpcClient>>>`. Commands clone the `Arc` while holding a read lock, then perform network work after the lock guard is released.
-
-### 5.4 Tauri commands
-
-Commands are grouped under `src-tauri/src/commands/`:
-
-`status.rs`:
-
-- `connect`
-- `disconnect`
-- `get_status`
-- `get_version`
-- `get_started_at`
-- `get_service_status`
-- `get_clash_mode_status`
-- `set_clash_mode`
-
-`groups.rs`:
-
-- `get_groups`
-- `select_outbound`
-- `url_test`
-- `set_group_expand`
-
-`connections.rs`:
-
-- `get_connections`
-- `close_connection`
-- `close_all_connections`
-
-`logs.rs`:
-
-- `get_logs`
-- `clear_logs`
-
-Rust parameter names use snake_case. Tauri exposes command arguments to JavaScript in camelCase by default. For example:
-
-```rust
-async fn select_outbound(group_tag: String, outbound_tag: String, ...)
-```
-
-is called from JavaScript as:
-
-```ts
-invoke("select_outbound", {
-  groupTag,
-  outboundTag,
-});
-```
-
-## 6. Background Tasks
-
-### 6.1 Status monitor
-
-`spawn_status_monitor` in `src-tauri/src/lib.rs`:
-
-1. Reads the current shared client from `AppState`
-2. Calls `SubscribeStatus` for a bounded interval
-3. Converts the latest status to `StatusInfo`
-4. Emits `status-update`
-5. Updates the tray title with upload/download speed
-6. Emits `connection-state` when the API becomes available or unavailable
-
-The status monitor continues retrying after failures. Reconnection is implicit because the client is stateless and each status cycle creates a new request.
-
-### 6.2 Tray proxy monitor
-
-`spawn_tray_proxy_monitor` polls `SubscribeGroups` periodically.
-
-When the serialized group state changes, it rebuilds the tray menu. The signature includes selected nodes, group structure, and delay values, so the checkmark and latency labels update after a selection or URL test.
-
-## 7. Tray Design
-
-The tray is implemented in `src-tauri/src/tray/mod.rs`.
-
-### Static menu items
-
-- Show Dashboard
-- Hide Dashboard
-- Quit
-
-Closing the main window hides it instead of exiting. The Quit menu sets `AppState.quitting = true` and then exits the app.
-
-### Proxy selector menu
-
-The dynamically rebuilt menu has this structure:
-
-```text
-Show Dashboard
-Hide Dashboard
-----------------
-Proxy
-├── select_out
-│   ├── checked jp_vless_out
-│   ├── jp_hy2_out
-│   └── ...
-└── another_group
-    └── ...
-----------------
-Quit
-```
-
-Selectable node IDs use this format:
-
-```text
-proxy:<group-tag>:<outbound-tag>
-```
-
-The menu event handler parses the ID and calls `GrpcClient::select_outbound` asynchronously.
-
-### Tray title
-
-The current compact format is:
-
-```text
-↑1.2M ↓3.4M
-```
-
-`M` means MiB/s-style binary units based on 1024-byte conversion. The macOS menu bar title uses the system font; Tauri/tray-icon does not expose a portable font-size setting.
-
-## 8. Frontend Design
-
-### `src/lib/api.ts`
-
-This is the only frontend API wrapper. It should contain thin `invoke()` wrappers and no presentation logic.
-
-### `src/lib/stores.ts`
-
-Global stores:
-
-- `connected`
-- `version`
-- `serviceStatus`
-- `status`
-- `groups`
-- `startedAt`
-- `statusHistory`
-
-Status history is capped at 60 points to keep chart memory bounded.
-
-### Views
-
-`Overview.svelte`:
-
-- Listens for `status-update`
-- Displays current upload/download speeds
-- Displays total traffic, memory, goroutines, connection counts
-- Keeps a 60-point SVG chart history
-
-`Groups.svelte`:
-
-- Polls groups periodically
-- Supports selector changes
-- Supports URL testing
-- Supports group expansion
-- Displays Clash mode selector when available
-
-`Connections.svelte`:
-
-- Polls connection event snapshots
-- Uses a reactive plain object keyed by connection ID
-- Handles NEW, UPDATE, and CLOSED events
-- Supports closing one or all connections
-
-`Logs.svelte`:
-
-- Polls log snapshots
-- Supports level filtering
-- Supports auto-scroll
-- Supports Clear
-- Supports keeping the latest 200 entries or unlimited local history
-
-`Settings.svelte`:
-
-- Configures API URL and secret
-- Connects and disconnects
-- Persists connection configuration in `localStorage`
-- Toggles light/dark theme
-
-## 9. Important Data Semantics
-
-### Status rate vs total
-
-From the sing-box `Status` message:
-
-- `uplink` / `downlink`: current byte rate
-- `uplink_total` / `downlink_total`: cumulative byte count
-
-The tray displays `uplink` and `downlink`, not cumulative totals.
-
-### Connection event types
-
-The numeric enum values are:
-
-```text
-0 = NEW
-1 = UPDATE
-2 = CLOSED
-```
-
-Do not change these frontend comparisons without also checking the proto enum.
-
-### Timestamps
-
-Connection timestamps are serialized as numeric values from protobuf `int64`. The frontend treats them as JavaScript numbers and uses them for duration display.
-
-## 10. Build and Verification
-
-From the project root:
+## 9. Testing
 
 ```bash
-pnpm install
-pnpm run check
-pnpm build
-pnpm tauri dev
-pnpm tauri build
+go test ./...
+go test -race ./...
 ```
 
-Rust-only checks:
+The tests cover the following:
+
+- the REST and WebSocket client against a fake controller, including the
+  escaping of proxy names and the error handling of HTTP failures
+- the state machine: the generation gate, the busy flags, the group tree,
+  the log filter, the connection sorting and the mode cycling
+- an end to end test that connects the dashboard to a fake controller and
+  waits for the streamed samples to arrive
+- the rendering of every page at several terminal sizes using the
+  simulation screen of tcell
+- the sing-box client against a fake instance, including the gRPC-Web
+  framing, the trailer handling and the rate normalisation
+
+The live check against the real instances is opt-in:
 
 ```bash
-cd src-tauri
-cargo check
-cargo build
+MIHOMO_TUI_LIVE=1 go test ./internal/singbox/ -run TestLiveInstances -v
 ```
 
-The local sing-box API should be running at `localhost:9000` for runtime verification.
+It reads the instance list from `MIHOMO_TUI_SERVERS` or from the servers
+file in the home directory and verifies the rate invariant for every
+sample.
 
-## 11. Adding a New API Method
+## 10. Known limitations
 
-Follow this order:
-
-1. Add only the required RPC/message definitions to `src-tauri/proto/started_service.proto`.
-2. Run `cargo check` so `tonic-build` regenerates the protobuf types.
-3. Add a typed method to `grpc/client.rs`.
-4. Convert protobuf data into a serializable application DTO in `state.rs`.
-5. Expose a Tauri command in the appropriate `commands` module.
-6. Register the command in `src-tauri/src/lib.rs`.
-7. Add a thin wrapper in `src/lib/api.ts`.
-8. Add or update a frontend store/view.
-9. Run both Rust and frontend checks.
-
-Avoid adding the complete upstream proto unless the feature really needs it. The local proto is intentionally smaller than the official dashboard proto.
-
-## 12. Known Limitations and Future Improvements
-
-- Server-streaming is currently implemented as bounded snapshot reads rather than one persistent stream per feature.
-- The status and tray group monitors each create periodic HTTP requests. A future optimization could use one persistent Rust subscription manager and fan out cached data to commands, events, and tray.
-- The tray title font size follows the operating system. A literal smaller macOS font would require platform-specific Objective-C/AppKit integration.
-- Log `Infinite` mode intentionally allows unbounded frontend memory growth. It should be used only for short debugging sessions; a future implementation could use a virtualized list or a disk-backed log store.
-- `serde_json::to_string(groups)` is used as a simple tray menu change signature. A custom lightweight signature would reduce allocation if group updates become frequent.
-- The generated protobuf types still include standard prost/tonic support code, but unused application-level RPCs and messages have been removed from the local proto.
-
-## 13. Modification Guidelines
-
-- Preserve the gRPC-Web framing and total stream deadline behavior.
-- Do not replace `no_proxy()` without considering localhost API access when a system proxy is active.
-- Keep network calls out of Tauri synchronous menu callbacks; spawn async work instead.
-- Release `RwLock` guards before awaiting network requests when possible.
-- Keep frontend API wrappers thin and keep formatting in `format.ts`.
-- Use `$state`, `$derived`, and `$effect` consistently in Svelte 5 runes mode.
-- Keep bounded histories and connection collections unless an explicit unlimited mode is required.
-- Run `cargo check` and `pnpm run check` after structural changes.
+- The connection table is a snapshot of the kernel. Closing a connection
+  is reflected after the next snapshot, which takes up to a second.
+- The dashboard does not persist the state of the kernel. The mode and the
+  node selection live in the kernel and survive a restart of the
+  dashboard.
+- The `Servers` page ignores secrets, because the instance list format
+  has no field for them.
+- A sing-box instance reports the transfer rate of the last push interval
+  only, so the value can be up to one second old.
+- A proxy group whose name contains a slash cannot be addressed, the
+  controller itself cannot route such a path either.
+- The kernel has to be reachable over plain HTTP or HTTPS. There is no
+  support for a Unix socket or a named pipe.
