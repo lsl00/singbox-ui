@@ -81,6 +81,16 @@ type App struct {
 	Help    bool
 	Servers []ServerMonitor
 
+	// OpenedServer is the index of the instance whose details are shown
+	// in the overlay, -1 when no instance is open.
+	OpenedServer     int
+	serverConns      connSet
+	serverLogs       []LogLine
+	serverCancel     context.CancelFunc
+	serverConnCursor int
+	serverLogOff     int
+	serverLogFoll    bool
+
 	Connected  bool
 	Connecting bool
 	ShouldQuit bool
@@ -103,7 +113,7 @@ type App struct {
 	GroupRows   []GroupRow
 	GroupRowsOK bool
 
-	Connections []clash.Connection
+	Connections []ConnInfo
 	ConnCursor  int
 	ConnSort    ConnSort
 	ShowDetails bool
@@ -139,16 +149,18 @@ type App struct {
 // New creates a dashboard for the given controller configuration.
 func New(api config.APIConfig) *App {
 	app := &App{
-		Config:      api,
-		View:        ViewOverview,
-		Proxies:     map[string]clash.Proxy{},
-		Expanded:    map[string]bool{},
-		Connections: []clash.Connection{},
-		Logs:        []LogLine{},
-		LogFollow:   true,
-		StreamUp:    map[string]bool{},
-		events:      make(chan Event, 256),
-		busy:        map[EventKind]bool{},
+		Config:        api,
+		View:          ViewOverview,
+		Proxies:       map[string]clash.Proxy{},
+		Expanded:      map[string]bool{},
+		Connections:   []ConnInfo{},
+		Logs:          []LogLine{},
+		LogFollow:     true,
+		StreamUp:      map[string]bool{},
+		OpenedServer:  -1,
+		serverLogFoll: true,
+		events:        make(chan Event, 256),
+		busy:          map[EventKind]bool{},
 	}
 	app.LogLevel.Store(LogLevelAll)
 	return app
@@ -209,7 +221,7 @@ func (a *App) Disconnect() {
 	a.Proxies = map[string]clash.Proxy{}
 	a.GroupNames = nil
 	a.Expanded = map[string]bool{}
-	a.Connections = []clash.Connection{}
+	a.Connections = []ConnInfo{}
 	a.Logs = []LogLine{}
 	a.StreamUp = map[string]bool{}
 	a.invalidateGroups()
@@ -276,8 +288,12 @@ func (a *App) poll(kind EventKind, fetch func(context.Context, *clash.Client) (E
 func (a *App) HandleEvent(event Event) {
 	// The server monitors are independent of the main connection, so
 	// their events bypass the generation gate.
-	if event.Kind == EventServer {
+	switch event.Kind {
+	case EventServer:
 		a.handleServer(event)
+		return
+	case EventServerConnections, EventServerLog, EventServerError:
+		a.handleServerEvent(event)
 		return
 	}
 	if event.Gen != a.gen {
@@ -439,6 +455,17 @@ func (a *App) appendLog(entry clash.LogEntry) {
 	}
 }
 
+// applyLogBatch appends the log records of a monitored instance.
+func (a *App) applyLogBatch(batch logBatch) {
+	if batch.Reset {
+		a.serverLogs = nil
+	}
+	a.serverLogs = append(a.serverLogs, batch.Entries...)
+	if len(a.serverLogs) > maxLogs {
+		a.serverLogs = a.serverLogs[len(a.serverLogs)-maxLogs:]
+	}
+}
+
 // severityOf returns the severity of a kernel log level. An unknown level
 // is treated as info.
 func severityOf(level string) int {
@@ -450,12 +477,13 @@ func severityOf(level string) int {
 
 // FilteredLogs returns the log lines matching the current level filter.
 func (a *App) FilteredLogs() []LogLine {
+	logs := a.Logs
 	threshold := int(a.LogLevel.Load())
 	if threshold == LogLevelAll {
-		return a.Logs
+		return logs
 	}
-	filtered := make([]LogLine, 0, len(a.Logs))
-	for _, line := range a.Logs {
+	filtered := make([]LogLine, 0, len(logs))
+	for _, line := range logs {
 		if severityOf(line.Level) >= threshold {
 			filtered = append(filtered, line)
 		}
@@ -468,7 +496,11 @@ func (a *App) applyConnections(snapshot *clash.ConnectionsSnapshot) {
 	if len(connections) > maxConns {
 		connections = connections[:maxConns]
 	}
-	a.Connections = connections
+	rows := make([]ConnInfo, 0, len(connections))
+	for _, connection := range connections {
+		rows = append(rows, connFromClash(connection))
+	}
+	a.Connections = rows
 	a.sortConnections()
 	a.clampConnCursor()
 }
@@ -482,7 +514,7 @@ func (a *App) sortConnections() {
 		case ConnSortUpload:
 			return left.Upload > right.Upload
 		default:
-			return left.Start.After(right.Start)
+			return left.CreatedAt.After(right.CreatedAt)
 		}
 	})
 }
@@ -501,11 +533,42 @@ func (a *App) clampConnCursor() {
 }
 
 // SelectedConnection returns the connection under the cursor.
-func (a *App) SelectedConnection() (clash.Connection, bool) {
+func (a *App) SelectedConnection() (ConnInfo, bool) {
 	if a.ConnCursor < 0 || a.ConnCursor >= len(a.Connections) {
-		return clash.Connection{}, false
+		return ConnInfo{}, false
 	}
 	return a.Connections[a.ConnCursor], true
+}
+
+// ServerConnections returns the connections of the opened instance.
+func (a *App) ServerConnections() []ConnInfo {
+	return a.serverConns.list()
+}
+
+// ServerFilteredLogs returns the log records of the opened instance that
+// match the current level filter.
+func (a *App) ServerFilteredLogs() []LogLine {
+	threshold := int(a.LogLevel.Load())
+	if threshold == LogLevelAll {
+		return a.serverLogs
+	}
+	filtered := make([]LogLine, 0, len(a.serverLogs))
+	for _, line := range a.serverLogs {
+		if severityOf(line.Level) >= threshold {
+			filtered = append(filtered, line)
+		}
+	}
+	return filtered
+}
+
+// SelectedServerConnection returns the connection of the opened instance
+// under the cursor.
+func (a *App) SelectedServerConnection() (ConnInfo, bool) {
+	connections := a.serverConns.list()
+	if a.serverConnCursor < 0 || a.serverConnCursor >= len(connections) {
+		return ConnInfo{}, false
+	}
+	return connections[a.serverConnCursor], true
 }
 
 // Mode returns the running tunnel mode.

@@ -33,7 +33,7 @@ func drawServers(screen tcell.Screen, x, y, width, height int, state *app.App) {
 				return
 			}
 			drawServerCard(screen, x+column*cardWidth, y+row*cardHeight, cardWidth, cardHeight,
-				&state.Servers[index], index == state.ServerCursor)
+				&state.Servers[index], index == state.ServerCursor, index == state.OpenedServer)
 		}
 	}
 }
@@ -49,7 +49,7 @@ func serverGridColumns(width int) (int, int, int) {
 }
 
 // drawServerCard renders one monitored instance.
-func drawServerCard(screen tcell.Screen, x, y, width, height int, monitor *app.ServerMonitor, selected bool) {
+func drawServerCard(screen tcell.Screen, x, y, width, height int, monitor *app.ServerMonitor, selected, opened bool) {
 	title := monitor.Entry.Name
 	titleColor := colorYellow
 	switch {
@@ -60,6 +60,9 @@ func drawServerCard(screen tcell.Screen, x, y, width, height int, monitor *app.S
 	}
 	if selected {
 		title = "> " + title
+	}
+	if opened {
+		title = "* " + title
 	}
 	drawBox(screen, x, y, width, height, "")
 	drawText(screen, x+2, y, width-4, " "+truncate(title, width-6)+" ",

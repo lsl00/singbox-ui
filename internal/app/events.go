@@ -60,6 +60,9 @@ const (
 	EventAction
 	EventStream
 	EventServer
+	EventServerConnections
+	EventServerLog
+	EventServerError
 )
 
 // ActionKind classifies a write operation the user triggered.
@@ -112,6 +115,11 @@ type Event struct {
 
 	ServerIndex int
 	ServerInfo  *ServerInfo
+
+	// Batch carries the changes of a monitored instance, either the
+	// connections or the log records.
+	ConnBatch *connBatch
+	LogBatch  *logBatch
 }
 
 // ServerInfo is the snapshot of one monitored instance.

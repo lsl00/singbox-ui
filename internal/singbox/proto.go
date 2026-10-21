@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // The protobuf wire types the dashboard has to understand.
@@ -256,18 +257,25 @@ func (p *frameParser) feed(chunk []byte) error {
 	return nil
 }
 
-// latest decodes the newest pending frame and discards the older ones.
-func (p *frameParser) latest() (Status, bool) {
+// pop returns the next complete data frame.
+func (p *frameParser) pop() ([]byte, bool) {
 	if len(p.pending) == 0 {
-		return Status{}, false
+		return nil, false
+	}
+	frame := p.pending[0]
+	p.pending = p.pending[1:]
+	return frame, true
+}
+
+// latestFrame returns the newest complete data frame and discards the
+// older ones.
+func (p *frameParser) latestFrame() ([]byte, bool) {
+	if len(p.pending) == 0 {
+		return nil, false
 	}
 	frame := p.pending[len(p.pending)-1]
 	p.pending = nil
-	status, err := decodeStatus(frame)
-	if err != nil {
-		return Status{}, false
-	}
-	return status, true
+	return frame, true
 }
 
 // frames returns the payloads of the complete data frames.
@@ -301,4 +309,306 @@ func checkTrailers(payload []byte) error {
 		return nil
 	}
 	return fmt.Errorf("gRPC error code %s: %s", status, message)
+}
+
+// decodeConnectionEvents decodes the ConnectionEvents message.
+func decodeConnectionEvents(data []byte) (ConnectionEvents, error) {
+	var value ConnectionEvents
+	r := &reader{data: data}
+	for !r.done() {
+		field, wireType, err := r.next()
+		if err != nil {
+			return value, err
+		}
+		switch field {
+		case 1:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			event, decodeErr := decodeConnectionEvent(payload)
+			if decodeErr != nil {
+				return value, decodeErr
+			}
+			value.Events = append(value.Events, event)
+		case 2:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Reset = number != 0
+		default:
+			if err := r.skip(wireType); err != nil {
+				return value, err
+			}
+		}
+	}
+	return value, nil
+}
+
+// decodeConnectionEvent decodes the ConnectionEvent message.
+func decodeConnectionEvent(data []byte) (ConnectionEvent, error) {
+	var value ConnectionEvent
+	r := &reader{data: data}
+	for !r.done() {
+		field, wireType, err := r.next()
+		if err != nil {
+			return value, err
+		}
+		switch field {
+		case 1:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Type = int32(number)
+		case 2:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.ID = string(payload)
+		case 3:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			connection, decodeErr := decodeConnection(payload)
+			if decodeErr != nil {
+				return value, decodeErr
+			}
+			value.Connection = &connection
+		case 4:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.UplinkDelta = int64(number)
+		case 5:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.DownlinkDelta = int64(number)
+		case 6:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.ClosedAt = int64(number)
+		default:
+			if err := r.skip(wireType); err != nil {
+				return value, err
+			}
+		}
+	}
+	return value, nil
+}
+
+// decodeConnection decodes the Connection message.
+func decodeConnection(data []byte) (Connection, error) {
+	var value Connection
+	r := &reader{data: data}
+	for !r.done() {
+		field, wireType, err := r.next()
+		if err != nil {
+			return value, err
+		}
+		switch field {
+		case 1:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.ID = string(payload)
+		case 2:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Inbound = string(payload)
+		case 3:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.InboundType = string(payload)
+		case 5:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Network = string(payload)
+		case 6:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Source = string(payload)
+		case 7:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Destination = string(payload)
+		case 8:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Domain = string(payload)
+		case 9:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Protocol = string(payload)
+		case 12:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.CreatedAt = int64(number)
+		case 13:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.ClosedAt = int64(number)
+		case 14:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Uplink = int64(number)
+		case 15:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Downlink = int64(number)
+		case 16:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.UplinkTotal = int64(number)
+		case 17:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.DownlinkTotal = int64(number)
+		case 18:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Rule = string(payload)
+		case 19:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Outbound = string(payload)
+		case 20:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.OutboundType = string(payload)
+		case 21:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.ChainList = append(value.ChainList, string(payload))
+		default:
+			if err := r.skip(wireType); err != nil {
+				return value, err
+			}
+		}
+	}
+	return value, nil
+}
+
+// decodeLog decodes the Log message.
+func decodeLog(data []byte) (Log, error) {
+	var value Log
+	r := &reader{data: data}
+	for !r.done() {
+		field, wireType, err := r.next()
+		if err != nil {
+			return value, err
+		}
+		switch field {
+		case 1:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			entry, decodeErr := decodeLogEntry(payload)
+			if decodeErr != nil {
+				return value, decodeErr
+			}
+			value.Messages = append(value.Messages, entry)
+		case 2:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Reset = number != 0
+		default:
+			if err := r.skip(wireType); err != nil {
+				return value, err
+			}
+		}
+	}
+	return value, nil
+}
+
+// decodeLogEntry decodes the Log.Message message.
+func decodeLogEntry(data []byte) (LogEntry, error) {
+	var value LogEntry
+	r := &reader{data: data}
+	for !r.done() {
+		field, wireType, err := r.next()
+		if err != nil {
+			return value, err
+		}
+		switch field {
+		case 1:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Level = int32(number)
+		case 2:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.Message = string(payload)
+		default:
+			if err := r.skip(wireType); err != nil {
+				return value, err
+			}
+		}
+	}
+	return value, nil
+}
+
+// encodeSubscribeConnectionsRequest builds the request of the connection
+// stream. The interval is the push interval in nanoseconds.
+func encodeSubscribeConnectionsRequest(interval time.Duration) []byte {
+	body := appendKey(nil, 1, wireVarint)
+	return appendVarint(body, uint64(interval.Nanoseconds()))
+}
+
+// encodeCloseConnectionRequest builds the request that closes one
+// connection.
+func encodeCloseConnectionRequest(id string) []byte {
+	body := appendKey(nil, 1, wireBytes)
+	body = appendVarint(body, uint64(len(id)))
+	return append(body, id...)
 }

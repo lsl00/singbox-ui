@@ -254,6 +254,42 @@ The decoder is verified against this invariant: the reported rate has to
 be the difference of the cumulative counters. The live test asserts it for
 every sample of every configured instance.
 
+### The overlay
+
+The overlay of an opened instance is drawn over the current page. The
+content area is cleared first, otherwise the borders of the page and of
+the overlay would overlap.
+
+The overlay holds the connection table in its upper half and the log
+records in its lower one. Both have their own cursor, the pages keep
+theirs, so opening an instance does not move the cursor of the local
+connection table.
+
+### The connection and the log stream
+
+An opened instance is inspected with two more streams:
+
+```text
+POST http://host:9000/daemon.StartedService/SubscribeConnections
+POST http://host:9000/daemon.StartedService/SubscribeLog
+```
+
+The connection stream is event driven. Its first message carries the
+current state with the reset flag set, the following ones only the changes
+of the connections. A new connection is reported with the type 0, a
+changed one with the type 1 and a closed one with the type 2. The rates of
+an update are the difference to the previous update, so the dashboard
+accumulates them.
+
+The log stream reports the records of the kernel. Its levels count the
+other way round than the levels of mihomo, so the dashboard maps them to
+its own severity names.
+
+Because both streams are event driven, an idle instance stays silent until
+the deadline. The deadline is not an error of the instance, but the
+subscription has to be opened again afterwards, which also resynchronises
+the connection state.
+
 ### Reading the stream
 
 The subscription stays open, so the probe keeps it and only reads the next
@@ -294,6 +330,11 @@ supervisor retries, and the dashboard reconnects on its own.
 | Logs | live log stream, severity filter, follow mode, scrolling |
 | Settings | controller URL, secret, configuration path, kernel actions |
 | Servers | grid of monitored instances with version, rates, totals, memory and connection count |
+
+An opened instance is shown in a modal overlay. The overlay covers the
+page, but the page below keeps the state of the local kernel, so closing
+the overlay restores it. The overlay is modal, the keys belong to it while
+it is open.
 
 ### Bounded buffers
 

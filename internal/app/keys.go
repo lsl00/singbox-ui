@@ -24,12 +24,22 @@ func (a *App) HandleKey(event *tcell.EventKey) {
 		a.handleSettingsEditing(event)
 		return
 	}
-	if event.Key() == tcell.KeyCtrlC || event.Rune() == 'q' {
+	if event.Key() == tcell.KeyCtrlC {
 		a.ShouldQuit = true
 		return
 	}
 	if event.Rune() == '?' {
 		a.Help = true
+		return
+	}
+	// The overlay of an opened instance is modal, it takes the keys
+	// before the pages do.
+	if a.OpenedServer >= 0 {
+		a.handleOverlayKey(event)
+		return
+	}
+	if event.Rune() == 'q' {
+		a.ShouldQuit = true
 		return
 	}
 	if a.View == ViewSettings && (event.Key() == tcell.KeyTab || event.Key() == tcell.KeyBacktab) {
@@ -43,6 +53,11 @@ func (a *App) HandleKey(event *tcell.EventKey) {
 	case tcell.KeyBacktab:
 		a.previousView()
 	case tcell.KeyEscape:
+		if a.OpenedServer >= 0 {
+			a.CloseServer()
+			a.Message = "closed the server"
+			return
+		}
 		a.Message = ""
 	default:
 		switch event.Rune() {
@@ -187,10 +202,73 @@ func (a *App) handleLogsKey(event *tcell.EventKey) {
 	}
 }
 
+// handleOverlayKey processes a key press while the overlay of an opened
+// instance is shown.
+func (a *App) handleOverlayKey(event *tcell.EventKey) {
+	switch event.Key() {
+	case tcell.KeyEscape:
+		a.CloseServer()
+		a.Message = "closed the server"
+		return
+	case tcell.KeyUp:
+		a.serverConnCursor = max(a.serverConnCursor-1, 0)
+		return
+	case tcell.KeyDown:
+		count := len(a.serverConns.list())
+		if count > 0 {
+			a.serverConnCursor = min(a.serverConnCursor+1, count-1)
+		}
+		return
+	case tcell.KeyPgUp:
+		a.serverLogFoll = false
+		a.serverLogOff += 10
+		return
+	case tcell.KeyPgDn:
+		a.serverLogOff = max(a.serverLogOff-10, 0)
+		if a.serverLogOff == 0 {
+			a.serverLogFoll = true
+		}
+		return
+	case tcell.KeyHome:
+		a.serverLogFoll = false
+		a.serverLogOff = int(^uint(0) >> 1)
+		return
+	case tcell.KeyEnd:
+		a.serverLogFoll = true
+		a.serverLogOff = 0
+		return
+	}
+	if event.Key() != tcell.KeyRune {
+		return
+	}
+	switch event.Rune() {
+	case 'q':
+		a.ShouldQuit = true
+	case 'f':
+		next := int(a.LogLevel.Load()) + 1
+		if next > LogLevelError {
+			next = LogLevelAll
+		}
+		a.LogLevel.Store(int32(next))
+		a.Message = "log filter: " + logLevelNames[next]
+	case 'a':
+		a.serverLogFoll = !a.serverLogFoll
+		if a.serverLogFoll {
+			a.serverLogOff = 0
+		}
+	case 'c':
+		a.closeServerConnection()
+	case 'C':
+		a.closeAllServerConnections()
+	}
+}
+
 func (a *App) handleServersKey(event *tcell.EventKey) {
 	page := max(a.ServersPageSize, 1)
 	count := len(a.Servers)
 	switch event.Key() {
+	case tcell.KeyEnter:
+		a.OpenServer(a.ServerCursor)
 	case tcell.KeyUp:
 		a.ServerCursor = max(a.ServerCursor-1, 0)
 	case tcell.KeyDown:

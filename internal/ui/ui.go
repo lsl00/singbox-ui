@@ -38,6 +38,8 @@ func Draw(screen tcell.Screen, state *app.App) {
 			drawServers(screen, 0, 3, width, mainHeight, state)
 		}
 	}
+	// The overlay of an opened instance is drawn over the page.
+	drawServerOverlay(screen, state)
 	if footerY >= 0 {
 		drawFooter(screen, 0, footerY, width, state)
 	}
@@ -65,6 +67,13 @@ func drawHeader(screen tcell.Screen, x, y, width int, state *app.App) {
 	drawText(screen, x+13, y, width-14, version, cellStyle(colorMuted, colorPanel))
 	offset := 13 + len([]rune(version)) + 2
 	drawText(screen, x+offset, y, width-offset-1, statusText, cellStyle(statusColor, colorPanel))
+	offset += len([]rune(statusText)) + 2
+	if state.OpenedServer >= 0 {
+		// The overlay of an opened instance covers the page, the title
+		// bar only points at it.
+		drawText(screen, x+offset, y, width-offset-1, "[server open]",
+			cellStyle(colorYellow, colorPanel))
+	}
 
 	tabX := x + 1
 	for view := app.ViewOverview; view < app.ViewCount; view++ {
@@ -99,7 +108,11 @@ func drawFooter(screen tcell.Screen, x, y, width int, state *app.App) {
 	case app.ViewSettings:
 		hints = "Up/Down field  Enter/e edit  c connect  d disconnect  R reload  X restart"
 	case app.ViewServers:
-		hints = "Up/Down select  PgUp/PgDn page  Home/End"
+		hints = "Up/Down select  Enter open  PgUp/PgDn page  Home/End"
+	}
+	if state.OpenedServer >= 0 {
+		// The overlay is modal, so the hints belong to it.
+		hints = "Up/Down connection  PgUp/PgDn logs  f filter  a follow  c close  Esc close"
 	}
 	drawText(screen, x+1, y+1, width-2, hints, cellStyle(colorMuted, colorPanel))
 
@@ -137,7 +150,11 @@ func drawHelp(screen tcell.Screen, width, height int) {
 		"Connections: Up/Down, Enter, c, C, s",
 		"Logs:      Up/Down, PgUp/PgDn, Home/End, f, a, c",
 		"Settings:  Up/Down, Enter/e, c, d, R, X, F, P",
-		"Servers:   Up/Down, PgUp/PgDn, Home/End",
+		"Servers:   Up/Down, Enter open, PgUp/PgDn, Home/End",
+		"",
+		"Enter on the servers page opens an instance in an",
+		"overlay with its connections and its log records.",
+		"Esc closes the overlay again.",
 		"",
 		"Press ? or Esc to close.",
 	}

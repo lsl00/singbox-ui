@@ -34,15 +34,18 @@ func newTestApp() *app.App {
 		},
 		"Node B": {Name: "Node B", Type: "VMess"},
 	}
-	state.Connections = []clash.Connection{
+	state.Connections = []app.ConnInfo{
 		{
-			ID:       "conn-1",
-			Metadata: clash.Metadata{Network: "tcp", Type: "HTTP", Host: "example.com", SourceIP: "10.0.0.1", SourcePort: "1234", DestinationIP: "1.2.3.4", DestinationPort: "443"},
-			Upload:   10,
-			Download: 20,
-			Start:    time.Now().Add(-30 * time.Second),
-			Chains:   []string{"Selector", "Node A"},
-			Rule:     "DomainSuffix",
+			ID:          "conn-1",
+			Source:      "10.0.0.1:1234",
+			Destination: "example.com",
+			Protocol:    "HTTP",
+			Network:     "tcp",
+			Upload:      10,
+			Download:    20,
+			CreatedAt:   time.Now().Add(-30 * time.Second),
+			Chain:       []string{"Selector", "Node A"},
+			Rule:        "DomainSuffix",
 		},
 	}
 	state.Logs = []app.LogLine{

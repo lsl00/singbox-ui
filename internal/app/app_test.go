@@ -148,10 +148,10 @@ func TestActionIsRejectedWhileBusy(t *testing.T) {
 func TestConnectionsAreSortedBySelectedKey(t *testing.T) {
 	state := newTestApp()
 	base := time.Now()
-	state.Connections = []clash.Connection{
-		{ID: "a", Upload: 10, Download: 5, Start: base.Add(-2 * time.Minute)},
-		{ID: "b", Upload: 30, Download: 50, Start: base},
-		{ID: "c", Upload: 20, Download: 20, Start: base.Add(-time.Minute)},
+	state.Connections = []ConnInfo{
+		{ID: "a", Upload: 10, Download: 5, CreatedAt: base.Add(-2 * time.Minute)},
+		{ID: "b", Upload: 30, Download: 50, CreatedAt: base},
+		{ID: "c", Upload: 20, Download: 20, CreatedAt: base.Add(-time.Minute)},
 	}
 
 	state.ConnSort = ConnSortRecent

@@ -33,7 +33,9 @@ toolchain and no CGO, so it also runs on old Linux installations.
 - **Settings** — controller URL, bearer secret and configuration path,
   runtime mode switching, configuration reload, kernel restart and cache
   flushing
-- **Servers** — an optional overview of several monitored mihomo instances
+- **Servers** — an optional overview of several monitored instances, and
+  a modal overlay with the connections and the log records of an opened
+  instance
 
 ## Development
 
@@ -122,7 +124,12 @@ q/Ctrl-C   quit
 | Connections | Up/Down, `Enter` details, `c` close, `C` close all, `s` sort |
 | Logs | Up/Down, PgUp/PgDn, Home/End, `f` filter, `a` follow, `c` clear |
 | Settings | Up/Down, `Enter`/`e` edit, `c` connect, `d` disconnect, `R` reload, `X` restart, `F` flush dns, `P` flush fake-ip |
-| Servers | Up/Down, PgUp/PgDn, Home/End |
+| Servers | Up/Down, `Enter` open an instance in an overlay, PgUp/PgDn, Home/End |
+
+Opening an instance with `Enter` shows a modal overlay with the
+connections and the log records of that instance. The pages below keep
+showing the local kernel, the overlay only covers them while it is open.
+`Esc` closes the overlay again.
 
 ## Monitoring several instances
 
@@ -147,6 +154,38 @@ instance over the RESTful API of the controller.
 
 Without `--servers` the page stays empty and does not affect the other
 pages. The monitored instances use no secret.
+
+### Opening an instance
+
+The Servers page can open an instance to inspect it. A modal overlay
+appears with the connections and the log records of the instance:
+
+```text
+  +- jp  1.14.0-rc.1   [Esc closes] ---------------------------+
+  | Connections: 10 active  UP 0 B  DN 0 B                     |
+  | Destination        Proto  Chain  Rule   Upload  Download  |
+  | www.google.com           0                        0 B  0 B |
+  | ------------------------------------------------------------- |
+  | Logs: 0 shown, filter all [follow]                        |
+  +-------------------------------------------------------------+
+```
+
+The overlay is modal, so the keys belong to it while it is open:
+
+| Key | Action |
+| --- | --- |
+| Up/Down | move the cursor in the connection list |
+| PgUp/PgDn, Home/End | scroll the log records |
+| `f` | cycle the log level filter |
+| `a` | follow the newest log record |
+| `c` | close the selected connection of the instance |
+| `C` | close every connection of the instance |
+| `Esc` | close the overlay |
+
+The sing-box API reports the connections as events: the first message of
+the subscription carries the current state, the following ones only the
+changes. The streams are event driven, so an idle instance stays silent
+until the deadline and the subscription is opened again afterwards.
 
 ### The sing-box protocol
 
@@ -206,6 +245,9 @@ timeout is five seconds.
 | --- | --- |
 | `GetVersion` (gRPC-Web) | version of the instance |
 | `SubscribeStatus` (gRPC-Web stream) | memory, goroutines, connections and traffic |
+| `SubscribeConnections` (gRPC-Web stream) | the connections of an opened instance |
+| `SubscribeLog` (gRPC-Web stream) | the log records of an opened instance |
+| `CloseConnection`, `CloseAllConnections` | close the connections of an opened instance |
 
 
 See [DESIGN.md](DESIGN.md) for the internal architecture.

@@ -138,9 +138,15 @@ func (a *App) cycleMode(direction int) {
 }
 
 // closeSelectedConnection closes the connection under the cursor.
+//
+// An opened instance is closed on the instance itself, otherwise the
+// connection of the local kernel is closed.
 func (a *App) closeSelectedConnection() {
 	connection, ok := a.SelectedConnection()
 	if !ok {
+		return
+	}
+	if a.OpenedServer >= 0 {
 		return
 	}
 	a.runAction(ActionCloseConnection, "closing connection", func(ctx context.Context, client *clash.Client) (Event, error) {
@@ -148,11 +154,71 @@ func (a *App) closeSelectedConnection() {
 	})
 }
 
+// closeServerConnection closes the connection of the opened instance that
+// is under the cursor.
+func (a *App) closeServerConnection() {
+	connection, ok := a.SelectedServerConnection()
+	if !ok {
+		return
+	}
+	a.closeServerConnectionByID(connection.ID)
+}
+
+// closeServerConnectionByID closes a connection of the opened instance.
+func (a *App) closeServerConnectionByID(id string) {
+	if a.OpenedServer < 0 || a.OpenedServer >= len(a.Servers) {
+		return
+	}
+	monitor := &a.Servers[a.OpenedServer]
+	if monitor.Probe == nil {
+		return
+	}
+	probe := monitor.Probe
+	a.runServerAction("closing connection", func(ctx context.Context) error {
+		return probe.CloseConnection(ctx, id)
+	})
+}
+
 // closeAllConnections closes every tracked connection.
 func (a *App) closeAllConnections() {
+	if a.OpenedServer >= 0 {
+		a.closeAllServerConnections()
+		return
+	}
 	a.runAction(ActionCloseAll, "closing all connections", func(ctx context.Context, client *clash.Client) (Event, error) {
 		return Event{}, client.CloseAllConnections(ctx)
 	})
+}
+
+// closeAllServerConnections closes every connection of the opened instance.
+func (a *App) closeAllServerConnections() {
+	if a.OpenedServer < 0 || a.OpenedServer >= len(a.Servers) {
+		return
+	}
+	monitor := &a.Servers[a.OpenedServer]
+	if monitor.Probe == nil {
+		return
+	}
+	probe := monitor.Probe
+	a.runServerAction("closing all connections", func(ctx context.Context) error {
+		return probe.CloseAllConnections(ctx)
+	})
+}
+
+// runServerAction performs a write operation on the opened instance.
+func (a *App) runServerAction(message string, run func(context.Context) error) {
+	if a.busy[EventAction] {
+		a.Message = "previous action still in progress"
+		return
+	}
+	a.busy[EventAction] = true
+	a.Message = message
+	gen := a.gen
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		a.events <- Event{Kind: EventAction, Gen: gen, Action: ActionCloseConnection, Err: run(ctx)}
+	}()
 }
 
 // reloadConfig asks the kernel to reload its configuration file.

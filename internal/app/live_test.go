@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -82,6 +83,79 @@ func TestLiveInstances(t *testing.T) {
 		}
 		stream.Close()
 		streamCancel()
+	}
+}
+
+// TestLiveStreams checks the connection and the log stream of a real
+// sing-box instance.
+//
+// Both streams are event driven, so an idle instance stays silent until
+// the deadline.
+func TestLiveStreams(t *testing.T) {
+	if os.Getenv("MIHOMO_TUI_LIVE") == "" {
+		t.Skip("set MIHOMO_TUI_LIVE=1 to run the live check")
+	}
+	path := os.Getenv("MIHOMO_TUI_SERVERS")
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("no home directory")
+		}
+		path = filepath.Join(home, "servers")
+	}
+	entries := config.LoadServerEntries(path)
+	if len(entries) == 0 {
+		t.Skipf("no instance list at %s", path)
+	}
+
+	client, err := singbox.New(entries[0].BaseURL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	connStream, err := client.OpenConnectionStream(ctx, time.Second)
+	if err != nil {
+		t.Fatal("open connections:", err)
+	}
+	defer connStream.Close()
+	for batch := 0; batch < 3; batch++ {
+		events, err := connStream.Next(10 * time.Second)
+		if err != nil {
+			if errors.Is(err, singbox.ErrTimeout) {
+				fmt.Println("  the instance is idle, no connection event")
+				break
+			}
+			t.Fatal("read connections:", err)
+		}
+		fmt.Printf("  connections batch %d: reset=%v events=%d\n", batch, events.Reset, len(events.Events))
+		for _, ev := range events.Events {
+			destination := ""
+			if ev.Connection != nil {
+				destination = ev.Connection.Destination
+			}
+			fmt.Printf("    type=%d id=%.8s up=%d down=%d dst=%s\n",
+				ev.Type, ev.ID, ev.UplinkDelta, ev.DownlinkDelta, destination)
+		}
+	}
+
+	logStream, err := client.OpenLogStream(ctx)
+	if err != nil {
+		t.Fatal("open logs:", err)
+	}
+	defer logStream.Close()
+	log, err := logStream.Next(10 * time.Second)
+	if err != nil {
+		if errors.Is(err, singbox.ErrTimeout) {
+			fmt.Println("  the instance is idle, no log record")
+			return
+		}
+		t.Fatal("read logs:", err)
+	}
+	fmt.Printf("  logs: reset=%v messages=%d\n", log.Reset, len(log.Messages))
+	for _, entry := range log.Messages {
+		fmt.Printf("    level=%d(%s) %s\n", entry.Level, singbox.LogLevelName(entry.Level), entry.Message)
 	}
 }
 

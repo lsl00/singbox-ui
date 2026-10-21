@@ -13,7 +13,7 @@ import (
 func drawConnections(screen tcell.Screen, x, y, width, height int, state *app.App) {
 	detailsHeight := 0
 	if state.ShowDetails {
-		detailsHeight = 8
+		detailsHeight = 9
 	}
 	tableHeight := height - detailsHeight
 	if tableHeight < 4 {
@@ -21,13 +21,14 @@ func drawConnections(screen tcell.Screen, x, y, width, height int, state *app.Ap
 		detailsHeight = 0
 	}
 
+	connections := state.Connections
 	up, down := int64(0), int64(0)
-	for _, connection := range state.Connections {
+	for _, connection := range connections {
 		up += connection.Upload
 		down += connection.Download
 	}
 	title := fmt.Sprintf("Connections: %d active  UP %s  DN %s  [sorted by %s]",
-		len(state.Connections), formatBytes(up), formatBytes(down), state.ConnSort.Label())
+		len(connections), formatBytes(up), formatBytes(down), state.ConnSort.Label())
 	drawBox(screen, x, y, width, tableHeight, title)
 	if tableHeight < 3 {
 		return
@@ -42,17 +43,17 @@ func drawConnections(screen tcell.Screen, x, y, width, height int, state *app.Ap
 	if state.ConnCursor >= visible {
 		start = state.ConnCursor - visible + 1
 	}
-	for line := 0; line < visible && start+line < len(state.Connections); line++ {
+	for line := 0; line < visible && start+line < len(connections); line++ {
 		index := start + line
-		connection := state.Connections[index]
+		connection := connections[index]
 		values := []string{
-			connection.Destination(),
-			connection.Metadata.Type,
-			joinChain(connection.Chains),
+			connection.Destination,
+			connection.Protocol,
+			joinChain(connection.Chain),
 			connection.Rule,
 			formatBytes(connection.Upload),
 			formatBytes(connection.Download),
-			formatAge(time.Since(connection.Start).Milliseconds()),
+			formatAge(time.Since(connection.CreatedAt).Milliseconds()),
 		}
 		style := cellStyle(colorText, colorBackground)
 		if index == state.ConnCursor {
@@ -70,18 +71,13 @@ func drawConnections(screen tcell.Screen, x, y, width, height int, state *app.Ap
 			drawText(screen, x+2, detailY+1, width-4, "No connection selected.", cellStyle(colorMuted, colorBackground))
 			return
 		}
-		metadata := connection.Metadata
-		destination := metadata.DestinationIP
-		if metadata.Host != "" {
-			destination = metadata.Host + " (" + metadata.DestinationIP + ")"
-		}
 		lines := []string{
-			fmt.Sprintf("%s %s -> %s:%s", metadata.Type, connection.Source(), destination, metadata.DestinationPort),
-			fmt.Sprintf("network: %s   dns: %s   inbound: %s", metadata.Network, valueOrDash(metadata.DNSMode), valueOrDash(metadata.InboundName)),
+			fmt.Sprintf("%s %s -> %s", connection.Protocol, connection.Source, connection.Destination),
+			fmt.Sprintf("network: %s   dns: %s   inbound: %s", connection.Network, valueOrDash(connection.DNSMode), valueOrDash(connection.Inbound)),
 			fmt.Sprintf("rule: %s (%s)", valueOrDash(connection.Rule), valueOrDash(connection.RulePayload)),
-			"chain: " + joinChain(connection.Chains),
+			"chain: " + joinChain(connection.Chain),
 			fmt.Sprintf("upload: %s   download: %s", formatBytes(connection.Upload), formatBytes(connection.Download)),
-			fmt.Sprintf("started: %s", connection.Start.Format(time.RFC3339)),
+			fmt.Sprintf("started: %s", connection.CreatedAt.Format(time.RFC3339)),
 			"id: " + connection.ID,
 		}
 		for index, line := range lines {
