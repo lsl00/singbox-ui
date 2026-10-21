@@ -34,29 +34,45 @@ func newFakeInstance(t *testing.T) *fakeInstance {
 			t.Error("the test server must support flushing")
 			return
 		}
-		// The first sample carries no rate, the difference to the
-		// previous sample is only computed after the first tick. Every
-		// following sample reports the difference of the cumulative
-		// counters, exactly like sing-box does.
-		writeFrame(writer, encodeStatus(1024, 7, 2, 1, true, 0, 0, 100, 200))
-		flusher.Flush()
-		samples := [][]int64{
-			{500, 1500, 600, 1700},
-			{1000, 1500, 1600, 3200},
-			{0, 1500, 1600, 4700},
-		}
-		for _, sample := range samples {
-			writeFrame(writer, encodeStatus(2048, 9, 3, 2, true,
-				sample[0], sample[1], sample[2], sample[3]))
+		// The samples repeat forever, so a reader that skips one of
+		// them still gets the next one. The goroutine count carries the
+		// index of the sample, which lets the test map a received sample
+		// back to its expected values.
+		for index := 0; ; index++ {
+			select {
+			case <-request.Context().Done():
+				return
+			default:
+			}
+			sample := statusSamples[index%len(statusSamples)]
+			writeFrame(writer, encodeStatus(sample.memory, int32(100+index), 3, 2, true,
+				sample.uplink, sample.downlink, sample.upTotal, sample.downTotal))
 			flusher.Flush()
-			// The gap has to be longer than the time the reader needs,
-			// otherwise the reader would pick up several samples at once.
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond)
 		}
 	})
 	instance.server = httptest.NewServer(mux)
 	t.Cleanup(instance.server.Close)
 	return instance
+}
+
+// statusSample is one expected sample of the fake instance.
+type statusSample struct {
+	memory             uint64
+	uplink, downlink   int64
+	upTotal, downTotal int64
+}
+
+// statusSamples are the samples the fake instance sends in a loop.
+//
+// The first one carries no rate, because sing-box computes the difference
+// to the previous sample only after the first tick. Every following
+// sample reports the difference of the cumulative counters.
+var statusSamples = []statusSample{
+	{memory: 1024, uplink: 0, downlink: 0, upTotal: 100, downTotal: 200},
+	{memory: 2048, uplink: 500, downlink: 1500, upTotal: 600, downTotal: 1700},
+	{memory: 2048, uplink: 1000, downlink: 1500, upTotal: 1600, downTotal: 3200},
+	{memory: 2048, uplink: 0, downlink: 1500, upTotal: 1600, downTotal: 4700},
 }
 
 func writeFrame(writer http.ResponseWriter, payload []byte) {
@@ -101,7 +117,7 @@ func TestClientGetVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version.Version != "1.14.3" || version.APIVersion != 4 {
+	if version.Version != "1.14.3" {
 		t.Fatalf("unexpected version: %+v", version)
 	}
 }
@@ -129,55 +145,35 @@ func TestStatusStreamDecodesSamples(t *testing.T) {
 	}
 	defer stream.Close()
 
-	first, err := stream.Next(5 * time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Memory != 1024 || first.Goroutines != 7 {
-		t.Fatalf("unexpected status: %+v", first)
-	}
-	if first.ConnectionsIn != 2 || first.ConnectionsOut != 1 {
-		t.Fatalf("unexpected connections: %+v", first)
-	}
-	if first.UplinkTotal != 100 || first.DownlinkTotal != 200 {
-		t.Fatalf("unexpected totals: %+v", first)
-	}
-	// The first sample of the stream never carries a rate.
-	if first.Uplink != 0 || first.Downlink != 0 {
-		t.Fatalf("the first sample must not carry a rate: %+v", first)
-	}
-
-	second, err := stream.Next(5 * time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Uplink != 500 || second.Downlink != 1500 {
-		t.Fatalf("unexpected rate: %+v", second)
-	}
-	if second.UplinkTotal != 600 || second.DownlinkTotal != 1700 {
-		t.Fatalf("unexpected totals: %+v", second)
-	}
-	// The rate has to be the difference of the cumulative counters.
-	if second.UplinkTotal-first.UplinkTotal != second.Uplink {
-		t.Fatalf("the rate does not match the counter delta: %+v", second)
-	}
-	if second.DownlinkTotal-first.DownlinkTotal != second.Downlink {
-		t.Fatalf("the rate does not match the counter delta: %+v", second)
-	}
-	// The rate is the delta of the interval, so it has to be normalised.
-	if second.UplinkRate() != 500 || second.DownlinkRate() != 1500 {
-		t.Fatalf("unexpected normalised rate: %+v", second)
-	}
-	if second.Connections() != 5 {
-		t.Fatalf("unexpected connection count: %+v", second)
-	}
-
-	third, err := stream.Next(5 * time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if third.Uplink != 1000 || third.UplinkTotal != 1600 {
-		t.Fatalf("unexpected rate: %+v", third)
+	// The reader may skip samples, so every received sample is checked
+	// against the table of the fake instance.
+	for i := 0; i < 6; i++ {
+		status, err := stream.Next(5 * time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		index := int(status.Goroutines) - 100
+		want := statusSamples[index%len(statusSamples)]
+		if status.Memory != want.memory {
+			t.Fatalf("unexpected memory: %+v", status)
+		}
+		if status.ConnectionsIn != 3 || status.ConnectionsOut != 2 {
+			t.Fatalf("unexpected connections: %+v", status)
+		}
+		if status.Uplink != want.uplink || status.Downlink != want.downlink {
+			t.Fatalf("unexpected rate: %+v", status)
+		}
+		if status.UplinkTotal != want.upTotal || status.DownlinkTotal != want.downTotal {
+			t.Fatalf("unexpected totals: %+v", status)
+		}
+		// The rate is the difference of the cumulative counters, the
+		// interval is one second, so the rate is the delta itself.
+		if status.UplinkRate() != want.uplink || status.DownlinkRate() != want.downlink {
+			t.Fatalf("unexpected normalised rate: %+v", status)
+		}
+		if status.Connections() != 5 {
+			t.Fatalf("unexpected connection count: %+v", status)
+		}
 	}
 }
 

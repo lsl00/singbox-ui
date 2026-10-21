@@ -35,6 +35,26 @@ toolchain and no CGO, so it also runs on old Linux installations.
   flushing
 - **Servers** — an optional overview of several monitored mihomo instances
 
+## Development
+
+```bash
+make build      # static binary without CGO
+make test       # run the tests
+make race       # run the tests with the race detector
+make lint       # go vet, gofmt -s, staticcheck and deadcode
+make check      # lint, test and race
+```
+
+The lint step needs two tools that are not part of the standard library:
+
+```bash
+go install honnef.co/go/tools/cmd/staticcheck@latest
+go install golang.org/x/tools/cmd/deadcode@latest
+```
+
+`staticcheck` reports the usual code smells, `deadcode` finds functions
+that are never called.
+
 ## Build
 
 Go 1.21 or newer is required.
@@ -167,6 +187,11 @@ first tick.
 | `DELETE /proxies/{name}` | clear the pinned node of an automatic group |
 | `GET /proxies/{name}/delay` | latency of a single node |
 | `GET /group/{name}/delay` | latency of every node of a group |
+
+The latency test uses the health check URL of the group, which mihomo
+reports as `testUrl`. Groups without a configured URL fall back to
+`https://www.gstatic.com/generate_204`, the default of mihomo itself. The
+timeout is five seconds.
 | `GET /traffic` (WS) | live rate and cumulative traffic |
 | `GET /memory` (WS) | kernel memory |
 | `GET /connections` (WS) | live connection snapshots |

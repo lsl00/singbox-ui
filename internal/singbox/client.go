@@ -1,3 +1,6 @@
+// Package singbox talks to the gRPC-Web API of a sing-box instance. The
+// protobuf codec is implemented by hand, so no protoc and no generated
+// code are needed.
 package singbox
 
 import (
@@ -22,8 +25,7 @@ const DefaultStatusInterval = time.Second
 
 // Version is the payload of the GetVersion call.
 type Version struct {
-	Version    string
-	APIVersion int32
+	Version string
 }
 
 // Status is the payload of the SubscribeStatus stream.
@@ -32,15 +34,14 @@ type Version struct {
 // push interval, not a normalised rate. Use UplinkRate and DownlinkRate to
 // get bytes per second.
 type Status struct {
-	Memory           uint64
-	Goroutines       int32
-	ConnectionsIn    int32
-	ConnectionsOut   int32
-	TrafficAvailable bool
-	Uplink           int64
-	Downlink         int64
-	UplinkTotal      int64
-	DownlinkTotal    int64
+	Memory         uint64
+	Goroutines     int32
+	ConnectionsIn  int32
+	ConnectionsOut int32
+	Uplink         int64
+	Downlink       int64
+	UplinkTotal    int64
+	DownlinkTotal  int64
 
 	// Interval is the push interval the rates refer to.
 	Interval time.Duration
@@ -110,11 +111,6 @@ func New(baseURL, secret string) (*Client, error) {
 		baseURL:    baseURL,
 		secret:     secret,
 	}, nil
-}
-
-// BaseURL returns the address of the instance.
-func (c *Client) BaseURL() string {
-	return c.baseURL
 }
 
 func (c *Client) methodURL(method string) string {

@@ -139,3 +139,11 @@ func readLog(ctx context.Context, stream *clash.Stream) (Event, bool) {
 	}
 	return Event{Kind: EventLog, Log: &entry}, true
 }
+
+// logQuery returns the server side log level filter.
+//
+// mihomo skips every record whose level is below the requested one, so
+// "debug" is the value that forwards everything the kernel produced.
+func logQuery() url.Values {
+	return url.Values{"level": []string{"debug"}}
+}

@@ -1,13 +1,15 @@
-package singbox
+package app
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
+
+	"mihomo-tui/internal/config"
+	"mihomo-tui/internal/singbox"
 )
 
 // TestLiveInstances checks the monitored instances against real sing-box
@@ -27,25 +29,13 @@ func TestLiveInstances(t *testing.T) {
 		}
 		path = filepath.Join(home, "servers")
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
+	if _, err := os.Stat(path); err != nil {
 		t.Skipf("no instance list at %s: %v", path, err)
 	}
 
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		address := fields[1]
-		if !strings.Contains(address, "://") {
-			address = "http://" + address
-		}
-		client, err := New(address, "")
+	for _, entry := range config.LoadServerEntries(path) {
+		address := entry.BaseURL
+		client, err := singbox.New(address, "")
 		if err != nil {
 			t.Errorf("%s: %v", address, err)
 			continue
@@ -85,7 +75,7 @@ func TestLiveInstances(t *testing.T) {
 			}
 			prevUp, prevDown = status.UplinkTotal, status.DownlinkTotal
 			fmt.Printf("%-6s %-30s v%-12s mem=%-11s goroutines=%-4d conns=%-4d up=%-12s down=%-12s upTotal=%-12s downTotal=%-12s\n",
-				fields[0], address, version.Version,
+				entry.Name, address, version.Version,
 				formatBytes(int64(status.Memory)), status.Goroutines, status.Connections(),
 				formatBytes(status.UplinkRate()), formatBytes(status.DownlinkRate()),
 				formatBytes(status.UplinkTotal), formatBytes(status.DownlinkTotal))

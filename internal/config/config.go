@@ -1,3 +1,5 @@
+// Package config resolves the command line, the configuration file and the
+// list of monitored instances.
 package config
 
 import (

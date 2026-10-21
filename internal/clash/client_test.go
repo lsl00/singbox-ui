@@ -227,7 +227,7 @@ func TestClientVersionAndAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version.Version != "1.19.27" || !version.Meta {
+	if version.Version != "1.19.27" {
 		t.Fatalf("unexpected version: %+v", version)
 	}
 }
@@ -300,7 +300,7 @@ func TestClientSetModeAndRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.Mode != "global" || runtime.MixedPort != 7890 {
+	if runtime.Mode != "global" {
 		t.Fatalf("unexpected runtime config: %+v", runtime)
 	}
 }

@@ -34,16 +34,20 @@ The design goals are:
     ├── singbox/             # sing-box gRPC-Web client
     │   ├── client.go        # unary calls and the status stream
     │   ├── proto.go         # gRPC-Web framing and protobuf codec
-    │   ├── client_test.go
-    │   └── live_test.go     # opt-in check against real instances
+    │   └── client_test.go
     ├── app/                 # dashboard state machine
-    │   ├── app.go           # state, event handling, key handling
+    │   ├── app.go           # state, lifecycle, event handling
     │   ├── actions.go       # write operations
+    │   ├── keys.go          # key handling and the settings editor
+    │   ├── groups.go        # the proxy group tree
     │   ├── events.go        # event and action types
     │   ├── servers.go       # monitored instances
     │   ├── streams.go       # stream supervision
     │   ├── app_test.go
-    │   └── integration_test.go
+    │   ├── groups_test.go
+    │   ├── servers_test.go
+    │   ├── integration_test.go
+    │   └── live_test.go     # opt-in check against real instances
     └── ui/                  # tcell rendering
         ├── ui.go            # frame, header, footer, help
         ├── overview.go
@@ -132,6 +136,17 @@ the default `?level=info` would drop every warning and error. The
 dashboard always requests `?level=debug` and applies the severity filter
 itself, which keeps the filter switchable without reconnecting and works
 independently of the controller version.
+
+### Latency tests
+
+The latency test uses the health check URL of the group, which mihomo
+reports as `testUrl`. Using the URL of the group keeps the latency history
+of the nodes consistent with the health checks of the group itself. A group
+without a configured URL falls back to the default of mihomo,
+`https://www.gstatic.com/generate_204`. The timeout is five seconds.
+
+The `GLOBAL` group holds every proxy of the configuration, so it is
+listed last in the group tree.
 
 ### Write operations
 
@@ -320,8 +335,25 @@ The environment variables are `MIHOMO_API_URL` and `MIHOMO_API_SECRET`.
 ## 9. Testing
 
 ```bash
+make check
+```
+
+which runs the tests, the race detector and the static analysis:
+
+```bash
 go test ./...
 go test -race ./...
+go vet ./...
+gofmt -s -l .
+staticcheck -checks=all ./...
+deadcode ./...
+```
+
+`staticcheck` and `deadcode` are not part of the standard library:
+
+```bash
+go install honnef.co/go/tools/cmd/staticcheck@latest
+go install golang.org/x/tools/cmd/deadcode@latest
 ```
 
 The tests cover the following:
@@ -340,7 +372,7 @@ The tests cover the following:
 The live check against the real instances is opt-in:
 
 ```bash
-MIHOMO_TUI_LIVE=1 go test ./internal/singbox/ -run TestLiveInstances -v
+MIHOMO_TUI_LIVE=1 go test ./internal/app/ -run TestLiveInstances -v
 ```
 
 It reads the instance list from `MIHOMO_TUI_SERVERS` or from the servers

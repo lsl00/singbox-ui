@@ -46,8 +46,8 @@ func fillRect(screen tcell.Screen, x, y, width, height int, style tcell.Style) {
 	if x >= screenWidth || y >= screenHeight {
 		return
 	}
-	width = minInt(width, screenWidth-x)
-	height = minInt(height, screenHeight-y)
+	width = min(width, screenWidth-x)
+	height = min(height, screenHeight-y)
 	if width <= 0 || height <= 0 {
 		return
 	}
@@ -69,12 +69,12 @@ func drawText(screen tcell.Screen, x, y, width int, text string, style tcell.Sty
 	}
 	if x < 0 {
 		runes := []rune(text)
-		skip := minInt(-x, len(runes))
+		skip := min(-x, len(runes))
 		text = string(runes[skip:])
 		width += x
 		x = 0
 	}
-	width = minInt(width, screenWidth-x)
+	width = min(width, screenWidth-x)
 	if width <= 0 {
 		return
 	}
@@ -116,15 +116,15 @@ func drawBox(screen tcell.Screen, x, y, width, height int, title string) {
 
 // drawPlaceholder shows a centered hint box.
 func drawPlaceholder(screen tcell.Screen, x, y, width, height int, title, detail string) {
-	boxWidth := minInt(maxInt(width-4, 24), 64)
-	boxHeight := minInt(maxInt(height-2, 5), 7)
-	boxWidth = minInt(boxWidth, width)
-	boxHeight = minInt(boxHeight, height)
+	boxWidth := min(max(width-4, 24), 64)
+	boxHeight := min(max(height-2, 5), 7)
+	boxWidth = min(boxWidth, width)
+	boxHeight = min(boxHeight, height)
 	if boxWidth <= 0 || boxHeight <= 0 {
 		return
 	}
-	boxX := x + maxInt((width-boxWidth)/2, 0)
-	boxY := y + maxInt((height-boxHeight)/2, 0)
+	boxX := x + max((width-boxWidth)/2, 0)
+	boxY := y + max((height-boxHeight)/2, 0)
 	drawBox(screen, boxX, boxY, boxWidth, boxHeight, title)
 	if boxHeight >= 3 {
 		drawText(screen, boxX+2, boxY+2, boxWidth-4, detail, cellStyle(colorMuted, colorBackground))
@@ -168,7 +168,7 @@ func drawSparkline(screen tcell.Screen, x, y, width int, label string, values []
 	if width <= 0 {
 		return
 	}
-	drawText(screen, x, y, minInt(width, 4), label, cellStyle(color, colorBackground).Bold(true))
+	drawText(screen, x, y, min(width, 4), label, cellStyle(color, colorBackground).Bold(true))
 	graphX := x + 4
 	graphWidth := width - 4
 	if graphWidth <= 0 {
@@ -187,9 +187,9 @@ func drawSparkline(screen tcell.Screen, x, y, width int, label string, values []
 		if index >= len(values) {
 			index = len(values) - 1
 		}
-		ratio := float64(maxInt64(values[index], 0)) / float64(peak)
+		ratio := float64(max(values[index], 0)) / float64(peak)
 		level := int(math.Round(ratio * float64(len(bars)-1)))
-		level = minInt(maxInt(level, 0), len(bars)-1)
+		level = min(max(level, 0), len(bars)-1)
 		// A non zero sample must stay visible even when the other
 		// direction dominates the shared scale.
 		if level == 0 && values[index] > 0 {
@@ -253,27 +253,15 @@ func formatBytes(value int64) string {
 
 // formatRate renders a byte rate.
 func formatRate(value int64) string {
-	return formatBytes(maxInt64(value, 0)) + "/s"
+	return formatBytes(max(value, 0)) + "/s"
 }
 
-// formatDuration renders a millisecond duration in a compact form.
-func formatDuration(milliseconds int64) string {
-	if milliseconds <= 0 {
-		return "0s"
+// formatDelay renders a measured latency the way the tables show it.
+func formatDelay(delay uint16, known bool) string {
+	if !known || delay == 0 {
+		return "timeout"
 	}
-	seconds := milliseconds / 1000
-	if seconds < 60 {
-		return fmt.Sprintf("%ds", seconds)
-	}
-	minutes := seconds / 60
-	if seconds < 3600 {
-		return fmt.Sprintf("%dm %ds", minutes, seconds%60)
-	}
-	hours := minutes / 60
-	if hours < 24 {
-		return fmt.Sprintf("%dh %dm", hours, minutes%60)
-	}
-	return fmt.Sprintf("%dd %dh", hours/24, hours%24)
+	return fmt.Sprintf("%dms", delay)
 }
 
 // formatAge renders a duration in the compact form used by the tables.
@@ -292,34 +280,6 @@ func formatAge(milliseconds int64) string {
 	default:
 		return fmt.Sprintf("%dd", seconds/86400)
 	}
-}
-
-func maxInt(left, right int) int {
-	if left > right {
-		return left
-	}
-	return right
-}
-
-func minInt(left, right int) int {
-	if left < right {
-		return left
-	}
-	return right
-}
-
-func maxInt64(left, right int64) int64 {
-	if left > right {
-		return left
-	}
-	return right
-}
-
-func minInt64(left, right int64) int64 {
-	if left < right {
-		return left
-	}
-	return right
 }
 
 func valueOrDash(value string) string {

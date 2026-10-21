@@ -24,7 +24,7 @@ func drawLogs(screen tcell.Screen, x, y, width, height int, state *app.App) {
 	if height < 3 {
 		return
 	}
-	visible := maxInt(height-2, 1)
+	visible := max(height-2, 1)
 	start := logStart(len(values), visible, state.LogFollow, state.LogOffset)
 	for line := 0; line < visible && start+line < len(values); line++ {
 		entry := values[start+line]
@@ -65,5 +65,5 @@ func logStart(total, height int, follow bool, offset int) int {
 	if offset == int(^uint(0)>>1) {
 		return 0
 	}
-	return maxInt(total-offset-height, 0)
+	return max(total-offset-height, 0)
 }

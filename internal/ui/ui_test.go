@@ -14,8 +14,8 @@ import (
 func newTestApp() *app.App {
 	state := app.New(config.APIConfig{URL: config.DefaultAPIURL})
 	state.Connected = true
-	state.Version = &clash.Version{Version: "1.19.27", Meta: true}
-	state.Runtime = &clash.Runtime{Mode: "rule", LogLevel: "info", MixedPort: 7890}
+	state.Version = &clash.Version{Version: "1.19.27"}
+	state.Runtime = &clash.Runtime{Mode: "rule", LogLevel: "info"}
 	state.Traffic = clash.Traffic{Up: 1024, Down: 2048, UpTotal: 1 << 20, DownTotal: 1 << 21}
 	state.TrafficUp = true
 	state.Memory = 12 << 20
@@ -25,14 +25,12 @@ func newTestApp() *app.App {
 	state.Proxies = map[string]clash.Proxy{
 		"Selector": {
 			Name: "Selector", Type: "Selector", All: []string{"Node A", "Node B"},
-			Now: "Node A",
-			History: []clash.DelayHistory{
-				{Time: time.Now(), Delay: 120},
-			},
+			Now:     "Node A",
+			History: []clash.DelayHistory{{Delay: 120}},
 		},
 		"Node A": {
 			Name: "Node A", Type: "Shadowsocks",
-			History: []clash.DelayHistory{{Time: time.Now(), Delay: 120}},
+			History: []clash.DelayHistory{{Delay: 120}},
 		},
 		"Node B": {Name: "Node B", Type: "VMess"},
 	}
@@ -116,16 +114,19 @@ func TestFormatHelpers(t *testing.T) {
 	if got := formatRate(1024); got != "1.00 KB/s" {
 		t.Fatalf("unexpected formatting: %q", got)
 	}
-	if got := formatDuration(0); got != "0s" {
+	if got := formatAge(0); got != "0s" {
 		t.Fatalf("unexpected formatting: %q", got)
 	}
-	if got := formatDuration(90 * 1000); got != "1m 30s" {
+	if got := formatAge(90 * 1000); got != "1m" {
 		t.Fatalf("unexpected formatting: %q", got)
 	}
-	if got := clash.FormatDelay(0, true); got != "timeout" {
+	if got := formatAge(3*3600*1000 + 25*60*1000); got != "3h25m" {
 		t.Fatalf("unexpected formatting: %q", got)
 	}
-	if got := clash.FormatDelay(120, true); got != "120ms" {
+	if got := formatDelay(0, true); got != "timeout" {
+		t.Fatalf("unexpected formatting: %q", got)
+	}
+	if got := formatDelay(120, true); got != "120ms" {
 		t.Fatalf("unexpected formatting: %q", got)
 	}
 }

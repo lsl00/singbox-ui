@@ -142,12 +142,6 @@ func decodeVersion(data []byte) (Version, error) {
 				return value, readErr
 			}
 			value.Version = string(payload)
-		case 2:
-			number, readErr := r.varint()
-			if readErr != nil {
-				return value, readErr
-			}
-			value.APIVersion = int32(number)
 		default:
 			if err := r.skip(wireType); err != nil {
 				return value, err
@@ -191,12 +185,6 @@ func decodeStatus(data []byte) (Status, error) {
 				return value, readErr
 			}
 			value.ConnectionsOut = int32(number)
-		case 5:
-			number, readErr := r.varint()
-			if readErr != nil {
-				return value, readErr
-			}
-			value.TrafficAvailable = number != 0
 		case 6:
 			number, readErr := r.varint()
 			if readErr != nil {
@@ -266,16 +254,6 @@ func (p *frameParser) feed(chunk []byte) error {
 		}
 	}
 	return nil
-}
-
-// pop returns the next complete data frame.
-func (p *frameParser) pop() ([]byte, bool) {
-	if len(p.pending) == 0 {
-		return nil, false
-	}
-	frame := p.pending[0]
-	p.pending = p.pending[1:]
-	return frame, true
 }
 
 // latest decodes the newest pending frame and discards the older ones.

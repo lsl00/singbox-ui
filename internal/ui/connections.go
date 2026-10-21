@@ -37,7 +37,7 @@ func drawConnections(screen tcell.Screen, x, y, width, height int, state *app.Ap
 	headers := []string{"Destination", "Proto", "Chain", "Rule", "Upload", "Download", "Age"}
 	drawColumns(screen, x+1, y+1, columns, headers, cellStyle(colorMuted, colorBackground).Bold(true))
 
-	visible := maxInt(tableHeight-3, 1)
+	visible := max(tableHeight-3, 1)
 	start := 0
 	if state.ConnCursor >= visible {
 		start = state.ConnCursor - visible + 1
@@ -96,7 +96,7 @@ func drawConnections(screen tcell.Screen, x, y, width, height int, state *app.Ap
 // connectionColumns computes the column widths of the connection table.
 func connectionColumns(width int) []int {
 	base := []int{22, 8, 20, 14, 9, 9, 7}
-	available := maxInt(width-2, len(base))
+	available := max(width-2, len(base))
 	need := 0
 	for _, value := range base {
 		need += value

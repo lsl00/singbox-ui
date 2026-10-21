@@ -6,7 +6,6 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"mihomo-tui/internal/app"
-	"mihomo-tui/internal/clash"
 )
 
 // drawGroups renders the policy group tree.
@@ -36,7 +35,7 @@ func drawGroups(screen tcell.Screen, x, y, width, height int, state *app.App) {
 	if listHeight < 3 {
 		return
 	}
-	visible := maxInt(listHeight-2, 1)
+	visible := max(listHeight-2, 1)
 	start := 0
 	if state.GroupCursor >= visible {
 		start = state.GroupCursor - visible + 1
@@ -81,7 +80,7 @@ func drawGroups(screen tcell.Screen, x, y, width, height int, state *app.App) {
 		proxy := state.Proxies[node]
 		delay, known := proxy.LastDelay()
 		drawText(screen, x+2, listY+1+lineIndex, width-4,
-			fmt.Sprintf("  %s %-32s  %-12s  %8s", marker, truncate(node, 32), truncate(proxy.Type, 12), clash.FormatDelay(delay, known)), itemStyle)
+			fmt.Sprintf("  %s %-32s  %-12s  %8s", marker, truncate(node, 32), truncate(proxy.Type, 12), formatDelay(delay, known)), itemStyle)
 	}
 	if len(rows) == 0 {
 		drawText(screen, x+2, listY+1, width-4, "No proxy groups.", cellStyle(colorMuted, colorBackground))

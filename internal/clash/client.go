@@ -1,3 +1,5 @@
+// Package clash talks to the external controller of a mihomo instance over
+// its RESTful API and its WebSocket streams.
 package clash
 
 import (
@@ -8,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -66,11 +67,6 @@ func New(cfg Config) (*Client, error) {
 		secret:  cfg.Secret,
 		http:    &http.Client{Transport: transport},
 	}, nil
-}
-
-// BaseURL returns the controller address without a trailing slash.
-func (c *Client) BaseURL() string {
-	return c.baseURL
 }
 
 func (c *Client) endpoint(path string) string {
@@ -195,12 +191,6 @@ func (c *Client) SelectProxy(ctx context.Context, group, node string) error {
 	return c.do(ctx, http.MethodPut, path, map[string]string{"name": node}, nil)
 }
 
-// ClearFixedSelection drops the pinned node of an automatic group.
-func (c *Client) ClearFixedSelection(ctx context.Context, group string) error {
-	path := "/proxies/" + url.PathEscape(group)
-	return c.do(ctx, http.MethodDelete, path, nil, nil)
-}
-
 // ProxyDelay measures the latency of a single node.
 func (c *Client) ProxyDelay(ctx context.Context, name, testURL string, timeout time.Duration) (uint16, error) {
 	path := fmt.Sprintf("/proxies/%s/delay?url=%s&timeout=%d",
@@ -245,12 +235,4 @@ func (c *Client) CloseConnection(ctx context.Context, id string) error {
 // CloseAllConnections closes every tracked connection.
 func (c *Client) CloseAllConnections(ctx context.Context) error {
 	return c.do(ctx, http.MethodDelete, "/connections", nil, nil)
-}
-
-// FormatDelay renders a latency the way the UI shows it.
-func FormatDelay(delay uint16, known bool) string {
-	if !known || delay == 0 {
-		return "timeout"
-	}
-	return strconv.Itoa(int(delay)) + "ms"
 }

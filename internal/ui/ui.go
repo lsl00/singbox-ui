@@ -1,3 +1,4 @@
+// Package ui renders the dashboard with tcell.
 package ui
 
 import (
@@ -78,13 +79,13 @@ func drawHeader(screen tcell.Screen, x, y, width int, state *app.App) {
 			break
 		}
 	}
-	drawText(screen, x, y+2, width, strings.Repeat("-", maxInt(width, 0)), cellStyle(colorBorder, colorPanel))
+	drawText(screen, x, y+2, width, strings.Repeat("-", max(width, 0)), cellStyle(colorBorder, colorPanel))
 }
 
 // drawFooter renders the key hints and the status message.
 func drawFooter(screen tcell.Screen, x, y, width int, state *app.App) {
 	fillRect(screen, x, y, width, 3, cellStyle(colorText, colorPanel))
-	drawText(screen, x, y, width, strings.Repeat("-", maxInt(width, 0)), cellStyle(colorBorder, colorPanel))
+	drawText(screen, x, y, width, strings.Repeat("-", max(width, 0)), cellStyle(colorBorder, colorPanel))
 	hints := "1-6 pages  r refresh  ? help  q quit"
 	switch state.View {
 	case app.ViewOverview:
@@ -109,20 +110,20 @@ func drawFooter(screen tcell.Screen, x, y, width int, state *app.App) {
 	} else if state.Message != "" {
 		message, messageColor = state.Message, colorYellow
 	}
-	drawText(screen, x+1, y+2, width-2, truncate(message, maxInt(width-2, 0)), cellStyle(messageColor, colorPanel))
+	drawText(screen, x+1, y+2, width-2, truncate(message, max(width-2, 0)), cellStyle(messageColor, colorPanel))
 }
 
 // drawHelp renders the keyboard shortcut overlay.
 func drawHelp(screen tcell.Screen, width, height int) {
-	boxWidth := minInt(maxInt(width-4, 30), 72)
-	boxHeight := minInt(maxInt(height-4, 12), 18)
-	boxWidth = minInt(boxWidth, width)
-	boxHeight = minInt(boxHeight, height)
+	boxWidth := min(max(width-4, 30), 72)
+	boxHeight := min(max(height-4, 12), 18)
+	boxWidth = min(boxWidth, width)
+	boxHeight = min(boxHeight, height)
 	if boxWidth <= 0 || boxHeight <= 0 {
 		return
 	}
-	boxX := maxInt((width-boxWidth)/2, 0)
-	boxY := maxInt((height-boxHeight)/2, 0)
+	boxX := max((width-boxWidth)/2, 0)
+	boxY := max((height-boxHeight)/2, 0)
 	fillRect(screen, boxX, boxY, boxWidth, boxHeight, cellStyle(colorText, colorPanel))
 	drawBox(screen, boxX, boxY, boxWidth, boxHeight, "Help")
 	lines := []string{

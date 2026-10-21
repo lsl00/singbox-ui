@@ -56,7 +56,7 @@ func drawOverview(screen tcell.Screen, x, y, width, height int, state *app.App) 
 	statsHeight := 4
 	bandHeight := y + height - lowerY - statsHeight - 1
 	if bandHeight < 4 {
-		bandHeight = maxInt(y+height-lowerY, 4)
+		bandHeight = max(y+height-lowerY, 4)
 		statsHeight = 0
 	}
 	if bandHeight > 0 {
@@ -92,10 +92,10 @@ func drawBandwidth(screen tcell.Screen, x, y, width, height int, state *app.App)
 	}
 	peak := int64(0)
 	for _, value := range state.HistoryUp {
-		peak = maxInt64(peak, value)
+		peak = max(peak, value)
 	}
 	for _, value := range state.HistoryDown {
-		peak = maxInt64(peak, value)
+		peak = max(peak, value)
 	}
 	drawText(screen, x+2, y+1, width-4, "peak "+formatRate(peak), cellStyle(colorMuted, colorBackground))
 	drawSparkline(screen, x+2, y+2, width-4, "UP", state.HistoryUp, peak, colorGreen)

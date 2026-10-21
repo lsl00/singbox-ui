@@ -17,7 +17,7 @@ func drawServers(screen tcell.Screen, x, y, width, height int, state *app.App) {
 		return
 	}
 	columns, cardWidth, cardHeight := serverGridColumns(width)
-	rowsVisible := maxInt(height/cardHeight, 1)
+	rowsVisible := max(height/cardHeight, 1)
 	state.ServersPageSize = rowsVisible * columns
 	cursorRow := state.ServerCursor / columns
 	if cursorRow < state.ServerScroll {
@@ -44,7 +44,7 @@ func serverGridColumns(width int) (int, int, int) {
 		minCardWidth = 30
 		cardHeight   = 7
 	)
-	columns := maxInt(width/minCardWidth, 1)
+	columns := max(width/minCardWidth, 1)
 	return columns, width / columns, cardHeight
 }
 
@@ -94,7 +94,7 @@ func drawServerCard(screen tcell.Screen, x, y, width, height int, monitor *app.S
 	state := "connecting..."
 	stateColor := colorYellow
 	if monitor.Err != "" {
-		state = truncate("offline: "+monitor.Err, maxInt(width-4, 0))
+		state = truncate("offline: "+monitor.Err, max(width-4, 0))
 		stateColor = colorRed
 	}
 	drawText(screen, x+2, y+2, width-4, state, cellStyle(stateColor, colorBackground))

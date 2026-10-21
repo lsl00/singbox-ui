@@ -10,7 +10,7 @@ import (
 
 // drawSettings renders the controller configuration and the kernel actions.
 func drawSettings(screen tcell.Screen, x, y, width, height int, state *app.App) {
-	connectionHeight := minInt(12, maxInt(height, 1))
+	connectionHeight := min(12, max(height, 1))
 	drawBox(screen, x, y, width, connectionHeight, "Connection")
 	if connectionHeight >= 9 {
 		urlStyle := cellStyle(colorText, colorBackground)
@@ -43,7 +43,7 @@ func drawSettings(screen tcell.Screen, x, y, width, height int, state *app.App) 
 	}
 
 	actionY := y + connectionHeight
-	actionHeight := minInt(7, maxInt(y+height-actionY, 0))
+	actionHeight := min(7, max(y+height-actionY, 0))
 	if actionHeight >= 2 {
 		drawBox(screen, x, actionY, width, actionHeight, "Kernel")
 		lines := []string{
@@ -79,7 +79,7 @@ func fieldDisplay(value string, secret, selected, editing bool, cursor int) stri
 	}
 	if selected && editing {
 		runes := []rune(value)
-		position := minInt(maxInt(cursor, 0), len(runes))
+		position := min(max(cursor, 0), len(runes))
 		runes = append(runes, 0)
 		copy(runes[position+1:], runes[position:])
 		runes[position] = '|'
