@@ -90,6 +90,7 @@ type App struct {
 	serverConnCursor int
 	serverLogOff     int
 	serverLogFoll    bool
+	serverDetails    bool
 
 	Connected  bool
 	Connecting bool

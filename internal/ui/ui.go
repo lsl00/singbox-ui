@@ -112,7 +112,7 @@ func drawFooter(screen tcell.Screen, x, y, width int, state *app.App) {
 	}
 	if state.OpenedServer >= 0 {
 		// The overlay is modal, so the hints belong to it.
-		hints = "Up/Down connection  PgUp/PgDn logs  f filter  a follow  c close  Esc close"
+		hints = "Up/Down connection  Enter details  PgUp/PgDn logs  f filter  a follow  c close  Esc close"
 	}
 	drawText(screen, x+1, y+1, width-2, hints, cellStyle(colorMuted, colorPanel))
 
@@ -154,7 +154,8 @@ func drawHelp(screen tcell.Screen, width, height int) {
 		"",
 		"Enter on the servers page opens an instance in an",
 		"overlay with its connections and its log records.",
-		"Esc closes the overlay again.",
+		"In the overlay Enter shows the details of the",
+		"selected connection, Esc closes the overlay.",
 		"",
 		"Press ? or Esc to close.",
 	}

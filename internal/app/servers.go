@@ -541,6 +541,7 @@ func (a *App) OpenServer(index int) {
 	a.serverConnCursor = 0
 	a.serverLogOff = 0
 	a.serverLogFoll = true
+	a.serverDetails = false
 	a.Message = "opened " + monitor.Entry.Name
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -560,6 +561,7 @@ func (a *App) CloseServer() {
 	a.serverLogs = nil
 	a.serverConnCursor = 0
 	a.serverLogOff = 0
+	a.serverDetails = false
 }
 
 // superviseServerConnections keeps the connection stream of an instance
@@ -701,6 +703,12 @@ func (a *App) OverlayTitle() string {
 		title += "  " + monitor.Info.Version
 	}
 	return title + "   [Esc closes]"
+}
+
+// OverlayDetails reports whether the detail panel of the overlay is
+// shown.
+func (a *App) OverlayDetails() bool {
+	return a.serverDetails
 }
 
 // OverlayCursor returns the cursor of the connection list of the overlay.

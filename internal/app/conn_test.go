@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
+
 	"mihomo-tui/internal/clash"
 	"mihomo-tui/internal/config"
 	"mihomo-tui/internal/singbox"
@@ -210,5 +212,33 @@ func TestConnFromClashKeepsTheDetails(t *testing.T) {
 	}
 	if info.Inbound != "mixed" || info.DNSMode != "fake-ip" {
 		t.Fatalf("unexpected metadata: %+v", info)
+	}
+}
+
+func TestEnterTogglesTheDetailPanelOfTheOverlay(t *testing.T) {
+	state := newTestApp()
+	state.OpenedServer = 0
+	state.Servers = []ServerMonitor{{Entry: entryNamed("hk")}}
+	if state.OverlayDetails() {
+		t.Fatalf("the detail panel is shown before it is asked for")
+	}
+	state.HandleKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if !state.OverlayDetails() {
+		t.Fatalf("the detail panel did not appear")
+	}
+	state.HandleKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if state.OverlayDetails() {
+		t.Fatalf("the detail panel did not disappear")
+	}
+}
+
+func TestTheDetailPanelOfTheOverlayIsResetWithTheInstance(t *testing.T) {
+	state := newTestApp()
+	state.OpenedServer = 0
+	state.Servers = []ServerMonitor{{Entry: entryNamed("hk")}}
+	state.serverDetails = true
+	state.CloseServer()
+	if state.OverlayDetails() {
+		t.Fatalf("the detail panel survived the closing")
 	}
 }

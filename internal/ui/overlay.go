@@ -3,11 +3,17 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
 	"mihomo-tui/internal/app"
 )
+
+// detailPanelHeight is the height of the detail panel of a connection.
+//
+// The panel shows a frame and up to eight lines.
+const detailPanelHeight = 10
 
 // drawServerOverlay draws the details of an opened instance over the
 // current page.
@@ -44,19 +50,49 @@ func drawServerOverlay(screen tcell.Screen, state *app.App) {
 	contentY := boxY + 1
 	contentHeight := boxHeight - 2
 
-	// The connections take the upper half, the log records the lower one.
-	connHeight := contentHeight * 55 / 100
+	// The detail panel of the selected connection takes a part of the
+	// box while it is shown. A small box cannot hold every line, so it
+	// falls back to the compact form.
+	detailsHeight := 0
+	compact := false
+	if state.OverlayDetails() {
+		room := contentHeight - 5 // the table keeps five rows
+		if room >= 7 {
+			detailsHeight = min(detailPanelHeight, room)
+			compact = detailsHeight < 9
+		}
+	}
+
+	available := contentHeight - detailsHeight
+	if detailsHeight > 0 {
+		available-- // the separator above the detail panel
+	}
+	connHeight := available * 55 / 100
+	if detailsHeight > 0 {
+		// The details are the focus, so the table keeps a fair share
+		// of the room.
+		connHeight = available * 65 / 100
+	}
 	if connHeight < 4 {
 		connHeight = 4
 	}
-	logHeight := contentHeight - connHeight - 1
-	if logHeight < 2 {
-		logHeight = 2
-	}
 
 	drawOverlayConnections(screen, contentX, contentY, inner, connHeight, state)
-	drawText(screen, contentX, contentY+connHeight, inner, strings.Repeat("-", inner), cellStyle(colorBorder, colorPanel))
-	drawOverlayLogs(screen, contentX, contentY+connHeight+1, inner, logHeight, state)
+
+	position := contentY + connHeight
+	if detailsHeight > 0 {
+		drawText(screen, contentX, position, inner, strings.Repeat("-", inner), cellStyle(colorBorder, colorPanel))
+		position++
+		drawOverlayDetails(screen, contentX, position, inner, detailsHeight, compact, state)
+		position += detailsHeight
+	}
+
+	logHeight := contentY + contentHeight - position
+	if logHeight >= 3 {
+		drawText(screen, contentX, position, inner, strings.Repeat("-", inner), cellStyle(colorBorder, colorPanel))
+		position++
+		drawOverlayLogs(screen, contentX, position, inner, logHeight-1, state)
+	}
 }
 
 // drawOverlayConnections renders the connection table of the overlay.
@@ -74,7 +110,7 @@ func drawOverlayConnections(screen tcell.Screen, x, y, width, height int, state 
 	}
 
 	columns := connectionColumns(width)
-	headers := []string{"Destination", "Proto", "Chain", "Rule", "Upload", "Download"}
+	headers := []string{"Destination", "Proto", "Chain", "Rule", "Upload", "Download", "Age"}
 	drawColumns(screen, x, y+1, columns, headers, cellStyle(colorMuted, colorPanel).Bold(true))
 
 	visible := max(height-2, 1)
@@ -92,6 +128,7 @@ func drawOverlayConnections(screen tcell.Screen, x, y, width, height int, state 
 			connection.Rule,
 			formatBytes(connection.Upload),
 			formatBytes(connection.Download),
+			formatAge(time.Since(connection.CreatedAt).Milliseconds()),
 		}
 		style := cellStyle(colorText, colorPanel)
 		if index == state.OverlayCursor() {
@@ -102,6 +139,29 @@ func drawOverlayConnections(screen tcell.Screen, x, y, width, height int, state 
 	}
 	if len(connections) == 0 {
 		drawText(screen, x, y+2, width, "No connections.", cellStyle(colorMuted, colorPanel))
+	}
+}
+
+// drawOverlayDetails renders the detail panel of the selected
+// connection of the overlay.
+//
+// A panel that cannot hold every line shows the compact form.
+func drawOverlayDetails(screen tcell.Screen, x, y, width, height int, compact bool, state *app.App) {
+	drawBox(screen, x, y, width, height, "Connection details")
+	connection, ok := state.SelectedServerConnection()
+	if !ok {
+		drawText(screen, x+2, y+1, width-4, "No connection selected.", cellStyle(colorMuted, colorBackground))
+		return
+	}
+	lines := connectionDetailLines(connection)
+	if compact {
+		lines = compactConnectionDetailLines(connection)
+	}
+	for index, line := range lines {
+		if y+1+index >= y+height-1 {
+			break
+		}
+		drawText(screen, x+2, y+1+index, width-4, line, cellStyle(colorText, colorBackground))
 	}
 }
 

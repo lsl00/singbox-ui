@@ -165,16 +165,31 @@ appears with the connections and the log records of the instance:
   | Connections: 10 active  UP 0 B  DN 0 B                     |
   | Destination        Proto  Chain  Rule   Upload  Download  |
   | www.google.com           0                        0 B  0 B |
-  | ------------------------------------------------------------- |
+  | ---------------------------------------------------------- |
+  | +- Connection details ------------------------------------+ |
+  | | tcp 10.0.0.1:51000 -> www.google.com                    | |
+  | | network: tcp   dns: -   inbound: 2 (vless)              | |
+  | | rule: - (-)                                            | |
+  | | chain: 0                                               | |
+  | | upload: 0 B   download: 1.28 KB                        | |
+  | | started: 2026-10-22T09:10:12+08:00                     | |
+  | | id: 0aec31ac-5bb6-44e4-b4ee-09a30a9b7ef7               | |
+  | +--------------------------------------------------------+ |
+  | ---------------------------------------------------------- |
   | Logs: 0 shown, filter all [follow]                        |
   +-------------------------------------------------------------+
 ```
+
+The detail panel shows the same lines as the one of the local kernel.
+A terminal that is too small for every line falls back to a short form
+of the panel, and the log records give way to it.
 
 The overlay is modal, so the keys belong to it while it is open:
 
 | Key | Action |
 | --- | --- |
 | Up/Down | move the cursor in the connection list |
+| `Enter` | show or hide the details of the selected connection |
 | PgUp/PgDn, Home/End | scroll the log records |
 | `f` | cycle the log level filter |
 | `a` | follow the newest log record |

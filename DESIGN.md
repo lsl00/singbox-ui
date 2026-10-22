@@ -265,6 +265,13 @@ records in its lower one. Both have their own cursor, the pages keep
 theirs, so opening an instance does not move the cursor of the local
 connection table.
 
+`Enter` adds a panel with the details of the selected connection between
+the table and the log records. The panel reuses the lines of the local
+connection page, so both kinds of connection show the same information.
+The panel takes a fixed part of the box; a terminal that is too small
+for every line gets a short form of the panel instead, and the log
+records give way to it.
+
 ### The connection and the log stream
 
 An opened instance is inspected with two more streams:

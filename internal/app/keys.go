@@ -210,6 +210,9 @@ func (a *App) handleOverlayKey(event *tcell.EventKey) {
 		a.CloseServer()
 		a.Message = "closed the server"
 		return
+	case tcell.KeyEnter:
+		a.serverDetails = !a.serverDetails
+		return
 	case tcell.KeyUp:
 		a.serverConnCursor = max(a.serverConnCursor-1, 0)
 		return

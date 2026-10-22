@@ -13,7 +13,7 @@ import (
 func drawConnections(screen tcell.Screen, x, y, width, height int, state *app.App) {
 	detailsHeight := 0
 	if state.ShowDetails {
-		detailsHeight = 9
+		detailsHeight = detailPanelHeight
 	}
 	tableHeight := height - detailsHeight
 	if tableHeight < 4 {
@@ -71,21 +71,55 @@ func drawConnections(screen tcell.Screen, x, y, width, height int, state *app.Ap
 			drawText(screen, x+2, detailY+1, width-4, "No connection selected.", cellStyle(colorMuted, colorBackground))
 			return
 		}
-		lines := []string{
-			fmt.Sprintf("%s %s -> %s", connection.Protocol, connection.Source, connection.Destination),
-			fmt.Sprintf("network: %s   dns: %s   inbound: %s", connection.Network, valueOrDash(connection.DNSMode), valueOrDash(connection.Inbound)),
-			fmt.Sprintf("rule: %s (%s)", valueOrDash(connection.Rule), valueOrDash(connection.RulePayload)),
-			"chain: " + joinChain(connection.Chain),
-			fmt.Sprintf("upload: %s   download: %s", formatBytes(connection.Upload), formatBytes(connection.Download)),
-			fmt.Sprintf("started: %s", connection.CreatedAt.Format(time.RFC3339)),
-			"id: " + connection.ID,
-		}
+		lines := connectionDetailLines(connection)
 		for index, line := range lines {
 			if detailY+1+index >= detailY+detailsHeight-1 {
 				break
 			}
 			drawText(screen, x+2, detailY+1+index, width-4, line, cellStyle(colorText, colorBackground))
 		}
+	}
+}
+
+// connectionDetailLines renders the lines of the detail panel of a
+// connection.
+//
+// The connections of the local kernel and of a monitored instance share
+// the panel, so both use the same lines.
+func connectionDetailLines(connection app.ConnInfo) []string {
+	inbound := valueOrDash(connection.Inbound)
+	if connection.InboundType != "" {
+		inbound += " (" + connection.InboundType + ")"
+	}
+	lines := []string{
+		fmt.Sprintf("%s %s -> %s", valueOrDash(connection.Protocol), valueOrDash(connection.Source), valueOrDash(connection.Destination)),
+		fmt.Sprintf("network: %s   dns: %s   inbound: %s", valueOrDash(connection.Network), valueOrDash(connection.DNSMode), inbound),
+		fmt.Sprintf("rule: %s (%s)", valueOrDash(connection.Rule), valueOrDash(connection.RulePayload)),
+		"chain: " + joinChain(connection.Chain),
+		fmt.Sprintf("upload: %s   download: %s", formatBytes(connection.Upload), formatBytes(connection.Download)),
+		fmt.Sprintf("started: %s", connection.CreatedAt.Format(time.RFC3339)),
+	}
+	if connection.Process != "" {
+		lines = append(lines, "process: "+connection.Process)
+	}
+	return append(lines, "id: "+connection.ID)
+}
+
+// compactConnectionDetailLines renders the short form of the detail
+// panel of a connection.
+//
+// A small box cannot hold every line of the panel.
+func compactConnectionDetailLines(connection app.ConnInfo) []string {
+	inbound := valueOrDash(connection.Inbound)
+	if connection.InboundType != "" {
+		inbound += " (" + connection.InboundType + ")"
+	}
+	return []string{
+		fmt.Sprintf("%s %s -> %s", valueOrDash(connection.Protocol), valueOrDash(connection.Source), valueOrDash(connection.Destination)),
+		fmt.Sprintf("network: %s   inbound: %s", valueOrDash(connection.Network), inbound),
+		fmt.Sprintf("rule: %s   chain: %s", valueOrDash(connection.Rule), joinChain(connection.Chain)),
+		fmt.Sprintf("upload: %s   download: %s", formatBytes(connection.Upload), formatBytes(connection.Download)),
+		"id: " + connection.ID,
 	}
 }
 

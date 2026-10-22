@@ -74,7 +74,19 @@ func connFromSingBox(c singbox.Connection) ConnInfo {
 		CreatedAt:   c.CreatedTime(),
 		Inbound:     c.Inbound,
 		InboundType: c.InboundType,
+		Process:     processOf(c.Process),
 	}
+}
+
+// processOf renders the process of a connection of a sing-box instance.
+func processOf(info *singbox.ProcessInfo) string {
+	if info == nil {
+		return ""
+	}
+	if info.ProcessPath != "" {
+		return info.ProcessPath
+	}
+	return info.PackageName
 }
 
 // stripPort removes the port of an address of the form host:port.

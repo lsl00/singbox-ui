@@ -346,6 +346,55 @@ func decodeConnectionEvents(data []byte) (ConnectionEvents, error) {
 	return value, nil
 }
 
+// decodeProcessInfo decodes the ProcessInfo message.
+func decodeProcessInfo(data []byte) (ProcessInfo, error) {
+	var value ProcessInfo
+	r := &reader{data: data}
+	for !r.done() {
+		field, wireType, err := r.next()
+		if err != nil {
+			return value, err
+		}
+		switch field {
+		case 1:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.ProcessID = int64(number)
+		case 2:
+			number, readErr := r.varint()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.UserID = int64(number)
+		case 3:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.UserName = string(payload)
+		case 4:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.ProcessPath = string(payload)
+		case 5:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			value.PackageName = string(payload)
+		default:
+			if err := r.skip(wireType); err != nil {
+				return value, err
+			}
+		}
+	}
+	return value, nil
+}
+
 // decodeConnectionEvent decodes the ConnectionEvent message.
 func decodeConnectionEvent(data []byte) (ConnectionEvent, error) {
 	var value ConnectionEvent
@@ -523,6 +572,16 @@ func decodeConnection(data []byte) (Connection, error) {
 				return value, readErr
 			}
 			value.ChainList = append(value.ChainList, string(payload))
+		case 22:
+			payload, readErr := r.bytes()
+			if readErr != nil {
+				return value, readErr
+			}
+			process, decodeErr := decodeProcessInfo(payload)
+			if decodeErr != nil {
+				return value, decodeErr
+			}
+			value.Process = &process
 		default:
 			if err := r.skip(wireType); err != nil {
 				return value, err

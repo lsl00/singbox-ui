@@ -22,6 +22,18 @@ type Connection struct {
 	Outbound      string
 	OutboundType  string
 	ChainList     []string
+	Process       *ProcessInfo
+}
+
+// ProcessInfo describes the process a connection belongs to.
+//
+// The instance reports it only when it can find the process.
+type ProcessInfo struct {
+	ProcessID   int64
+	UserID      int64
+	UserName    string
+	ProcessPath string
+	PackageName string
 }
 
 // ConnectionEvent is one change of a tracked connection.
